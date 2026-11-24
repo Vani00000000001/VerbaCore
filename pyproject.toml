@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "verbacore"
+version = "0.2.0"
+description = "Local-first offline speech recognition and audio intelligence"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "VerbaCore Contributors"}
+]
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "pydantic>=2.0.0",
+    "faster-whisper>=1.0.0",
+    "imageio-ffmpeg>=0.4.8",
+    "reportlab>=4.0.0",
+    "python-docx>=1.0.0",
+    "pymupdf>=1.23.0",
+    "srt>=3.5.0",
+    "python-multipart>=0.0.6",
+    "requests>=2.31.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0"
+]
+
+[project.scripts]
+verbacore = "verbacore.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

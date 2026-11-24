@@ -1,0 +1,61 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Secrets and local user configurations
+cloud_config.json
+.env
+.env.*
+!.env.example
+verba-core.toml
+
+# Local runtime data & user storage
+data/
+uploads/
+recordings/
+reports/
+checkpoints/
+*.webm
+*.wav
+*.mp3
+
+# Model weights & binary caches
+models/
+blobs/
+*.bin
+*.gguf
+*.onnx
+
+# Testing & quality caches
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS artifacts
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+.DS_Store

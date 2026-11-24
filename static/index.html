@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VerbaCore</title>
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- Sidebar -->
+<div class="sidebar">
+  <button class="btn-new" onclick="clearResults()">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <line x1="12" y1="5" x2="12" y2="19"></line>
+      <line x1="5" y1="12" x2="19" y2="12"></line>
+    </svg>
+    <span>New Transcription</span>
+  </button>
+
+  <div class="sidebar-section-title">Saved Recordings</div>
+  <div class="history-list" id="historyList">
+    <div style="font-size:12px; color:var(--text-dim); padding:10px 8px;">No recordings yet</div>
+  </div>
+
+  <div class="sidebar-footer">
+    <div class="badge-offline">LOCAL-FIRST &bull; CLOUD WHEN ENABLED</div>
+    <div>Offline Speech Recognition &bull; Audio Intelligence</div>
+    <div>Local Storage &bull; Private On-Device Processing</div>
+    <div>Engine: VerbaCore (Whisper + Brain LLM)</div>
+    <div>Recordings retained locally for 30 days. Cloud retry sends audio to the selected provider.</div>
+  </div>
+</div>
+
+<!-- Main Area -->
+<div class="main-wrapper">
+  <div class="top-bar">
+    <div class="top-controls">
+      <!-- Whisper Model Selection (Medium default) & Cloud Fallback -->
+      <select id="modelSelect" class="control-select">
+        <optgroup label="Local ASR Models (100% Offline)" id="localModelsOptgroup">
+          <option value="small" selected>faster-whisper Small (High Accuracy • 244M)</option>
+          <option value="medium">faster-whisper Medium (Pro Studio • 769M)</option>
+          <option value="base">faster-whisper Base (Fast • 74M)</option>
+          <option value="tiny">faster-whisper Tiny (Ultra Fast)</option>
+        </optgroup>
+        <optgroup label="Cloud Intelligence (Ultimate Accuracy & Code-Switching)">
+          <option value="cloud_gemini">Google Gemini Flash (Best for Long & Bilingual Speech • 1,500 RPD Free)</option>
+          <option value="cloud_groq">Groq Whisper Large V3 (Cloud LPU Fast • 7,200s Free)</option>
+        </optgroup>
+      </select>
+
+      <!-- Language & Code-Switching Selector -->
+      <select id="langSelect" class="control-select">
+        <option value="auto">Auto-Detect (Multilingual & Code-Switching)</option>
+        <option value="code_switch_ta_en">Tanglish (Tamil + English)</option>
+        <option value="code_switch_hi_en">Hinglish (Hindi + English)</option>
+        <option value="en">English</option>
+        <option value="ta">Tamil (தமிழ்)</option>
+        <option value="hi">Hindi (हिन्दी)</option>
+        <option value="es">Spanish</option>
+        <option value="fr">French</option>
+        <option value="de">German</option>
+        <option value="ja">Japanese</option>
+        <option value="zh">Chinese</option>
+        <option value="ar">Arabic</option>
+      </select>
+
+      <!-- Cloud Settings Button -->
+      <button class="btn-cloud-toggle" id="cloudBtn" onclick="openCloudModal()" title="Ultimate Cloud Fallback Settings">
+        <span class="cloud-status-dot" id="cloudDot"></span>
+        <span>Cloud Fallback</span>
+      </button>
+    </div>
+    <div style="font-size:12px; color:var(--text-muted);">
+      Executive PDF &bull; Word DOCX &bull; Plain TXT
+    </div>
+  </div>
+
+  <div class="chat-container" id="chatContainer">
+    <div class="content-width" id="cardsContainer">
+      <div class="hero-box" id="heroBox">
+        <div class="hero-title">VerbaCore Speech Intelligence & Synthesis</div>
+        <div class="hero-desc">
+          Powered by VerbaCore Studio (Whisper Medium 769M) and Local Brain LLM Reasoning. Resolves colloquial phonetics, dialogue turns, and code-switching with superior grammatical accuracy.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Prompt & Recording Bar -->
+  <div class="prompt-bar-container">
+    <div class="prompt-bar">
+      <input type="file" id="fileInput" accept="audio/*,video/*,.mp3,.wav,.m4a,.mp4,.ogg,.flac,.webm" style="display:none;" onchange="handleFileSelected(this)">
+      <button class="btn-attach" onclick="document.getElementById('fileInput').click()" title="Attach audio file">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+        </svg>
+      </button>
+
+      <input type="text" id="statusInput" class="prompt-input" placeholder="Choose audio or drag & drop (MP3, WAV, M4A, MP4, OGG, FLAC)..." readonly onclick="document.getElementById('fileInput').click()">
+
+      <button class="btn-mic" id="recordBtn" onclick="toggleRecording()" title="Record live voice">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+          <line x1="12" y1="19" x2="12" y2="23"></line>
+          <line x1="8" y1="23" x2="16" y2="23"></line>
+        </svg>
+      </button>
+
+      <button class="btn-send" id="sendBtn" onclick="document.getElementById('fileInput').click()" title="Upload & Transcribe">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+          <polyline points="12 5 19 12 12 19"></polyline>
+        </svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Cloud Fallback Settings Modal -->
+<div id="cloudModal" class="modal-overlay" onclick="if(event.target===this) closeCloudModal()">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+        </svg>
+        <span>Ultimate Cloud Fallback Config</span>
+      </div>
+      <button class="modal-close" onclick="closeCloudModal()">&times;</button>
+    </div>
+
+    <div style="font-size:12px; color:var(--text-muted); margin-bottom:16px; line-height:1.5;">
+      Local transcription runs on this computer. Cloud transcription sends the recording to the selected provider. Automatic cloud fallback is off by default; manual cloud retries always ask for confirmation.
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-label">
+        <span>Google Gemini Flash API Key</span>
+        <span class="tier-tag">1,500 Req / Day Free</span>
+      </div>
+      <input type="password" id="geminiKeyInput" class="modal-input" placeholder="AIzaSy... (from aistudio.google.com)">
+      <div class="modal-help">
+        Free tier: 15 RPM, 1,500 RPD, 1M TPM. Native audio understanding & timestamping. Zero credit card needed.
+      </div>
+      <div class="modal-row">
+        <button class="modal-btn-sm" onclick="testCloudKey('gemini')">Test Gemini API</button>
+        <span id="geminiTestResult" class="modal-msg"></span>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-label">
+        <span>Groq Cloud API Key</span>
+        <span class="tier-tag">7,200 Audio Sec / Hr Free</span>
+      </div>
+      <input type="password" id="groqKeyInput" class="modal-input" placeholder="gsk_... (from console.groq.com)">
+      <div class="modal-help">
+        Free tier: Whisper Large V3 Turbo running on Groq LPUs at 200x realtime.
+      </div>
+      <div class="modal-row">
+        <button class="modal-btn-sm" onclick="testCloudKey('groq')">Test Groq API</button>
+        <span id="groqTestResult" class="modal-msg"></span>
+      </div>
+    </div>
+
+    <div class="modal-section" style="display:flex; align-items:center; gap:10px;">
+      <input type="checkbox" id="autoFallbackCheck" style="width:16px; height:16px; cursor:pointer;">
+      <label for="autoFallbackCheck" style="font-size:13px; color:var(--text-main); cursor:pointer;">
+        <b>Automatically send audio to the cloud</b> if local transcription fails or quality is low
+      </label>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn-action" onclick="closeCloudModal()">Close</button>
+      <button class="btn-action btn-primary" onclick="saveCloudConfigSettings()">Save Settings</button>
+    </div>
+  </div>
+</div>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
