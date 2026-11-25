@@ -241,9 +241,9 @@ def start_llama_server(
         "stderr": subprocess.DEVNULL,
     }
     if platform.system() == "Windows":
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | getattr(
-            subprocess, "DETACHED_PROCESS", 0x00000008
-        )
+        kwargs["creationflags"] = getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
+        ) | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
 
     try:
         _LLAMA_PROCESS = subprocess.Popen(cmd, **kwargs)
