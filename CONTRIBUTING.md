@@ -12,8 +12,8 @@ Thanks for your interest in VerbaCore — the offline, turn-based multilingual s
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/your-username/verbacore.git
-cd verbacore
+git clone https://github.com/Vani00000000001/VerbaCore.git
+cd VerbaCore
 python -m venv .venv
 # Windows:
 .venv\Scripts\activate

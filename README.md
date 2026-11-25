@@ -25,8 +25,8 @@ VerbaCore runs 100% locally on your machine with zero cloud dependency required,
 Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/your-username/verbacore.git
-cd verbacore
+git clone https://github.com/Vani00000000001/VerbaCore.git
+cd VerbaCore
 pip install -e .
 ```
 
@@ -136,6 +136,17 @@ ollama run qwen2.5:1.5b
 # Option B: llama.cpp server
 llama-server -m models/qwen2.5-1.5b-instruct-q4_k_m.gguf --port 8080 -c 4096 --threads 4
 ```
+
+---
+
+## Design Scope & Roadmap (v0.3+)
+
+VerbaCore v0.2.0 is intentionally designed as a **single-user, localhost desktop application**:
+
+- **Single-User Loopback Scope:** Binds to `127.0.0.1:7860` without multi-user authentication or rate-limiting, and stores optional cloud keys locally in a gitignored `cloud_config.json`. Do not expose port `7860` directly to untrusted public networks.
+- **Planned Enhancements (v0.3+):**
+  - Offloading CPU-bound transcription and report generation from synchronous request handlers to an async worker pool / background job queue for concurrent requests.
+  - Splitting the single-file frontend (`static/js/app.js`) into modular ES modules.
 
 ---
 
