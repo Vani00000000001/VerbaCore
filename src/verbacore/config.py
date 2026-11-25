@@ -1,10 +1,13 @@
-import os
 import json
+import logging
+import os
 from pathlib import Path
 from typing import Optional
 from pydantic import BaseModel, Field
 
 from verbacore.utils.paths import get_data_dir, get_project_root
+
+logger = logging.getLogger(__name__)
 
 
 class AppConfig(BaseModel):
@@ -35,7 +38,7 @@ class AppConfig(BaseModel):
     # Cloud API Keys
     gemini_api_key: Optional[str] = None
     groq_api_key: Optional[str] = None
-    auto_fallback: bool = True
+    auto_fallback: bool = False
     preferred_cloud: str = "gemini"
 
 
@@ -54,21 +57,21 @@ def load_config() -> AppConfig:
         if p.is_file():
             try:
                 data = json.loads(p.read_text(encoding="utf-8"))
-                if "gemini_api_key" in data and data["gemini_api_key"]:
-                    cfg.gemini_api_key = data["gemini_api_key"]
-                if "groq_api_key" in data and data["groq_api_key"]:
-                    cfg.groq_api_key = data["groq_api_key"]
+                if not isinstance(data, dict):
+                    logger.warning("Ignoring invalid cloud config in %s: expected JSON object", p)
+                    continue
+                for field_name in ("gemini_api_key", "groq_api_key", "llama_server_path", "gguf_model_path"):
+                    val = data.get(field_name)
+                    if isinstance(val, str) and val.strip():
+                        setattr(cfg, field_name, val.strip())
                 if "auto_fallback" in data:
                     cfg.auto_fallback = bool(data["auto_fallback"])
-                if "preferred_cloud" in data:
-                    cfg.preferred_cloud = str(data["preferred_cloud"])
-                if "llama_server_path" in data and data["llama_server_path"]:
-                    cfg.llama_server_path = str(data["llama_server_path"])
-                if "gguf_model_path" in data and data["gguf_model_path"]:
-                    cfg.gguf_model_path = str(data["gguf_model_path"])
+                pref = data.get("preferred_cloud")
+                if isinstance(pref, str) and pref.strip():
+                    cfg.preferred_cloud = pref.strip()
                 break
-            except Exception:
-                pass
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
+                logger.warning("Failed to load cloud config from %s: %s", p, exc)
 
     # Environment variables override
     if key := os.environ.get("GEMINI_API_KEY"):
@@ -83,9 +86,17 @@ def load_config() -> AppConfig:
         cfg.host = host
     if port := os.environ.get("VERBACORE_PORT"):
         try:
-            cfg.port = int(port)
+            parsed_port = int(port)
+            if 1 <= parsed_port <= 65535:
+                cfg.port = parsed_port
+            else:
+                logger.warning(
+                    "VERBACORE_PORT %d out of valid range (1-65535); using default %d",
+                    parsed_port,
+                    cfg.port,
+                )
         except ValueError:
-            pass
+            logger.warning("Invalid VERBACORE_PORT value %r; using default %d", port, cfg.port)
     if llm_url := os.environ.get("VERBACORE_LLM_URL"):
         cfg.brain_llm_url = llm_url
 

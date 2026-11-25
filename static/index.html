@@ -37,11 +37,11 @@
 <div class="main-wrapper">
   <div class="top-bar">
     <div class="top-controls">
-      <!-- Whisper Model Selection (Medium default) & Cloud Fallback -->
+      <!-- Whisper Model Selection (Small default) & Cloud Fallback -->
       <select id="modelSelect" class="control-select">
         <optgroup label="Local ASR Models (100% Offline)" id="localModelsOptgroup">
           <option value="small" selected>faster-whisper Small (High Accuracy • 244M)</option>
-          <option value="medium">faster-whisper Medium (Pro Studio • 769M)</option>
+          <option value="medium">faster-whisper Medium (High Precision • 769M)</option>
           <option value="base">faster-whisper Base (Fast • 74M)</option>
           <option value="tiny">faster-whisper Tiny (Ultra Fast)</option>
         </optgroup>
@@ -67,7 +67,7 @@
         <option value="ar">Arabic</option>
       </select>
 
-      <!-- Cloud Settings Button -->
+      <!-- Cloud Fallback Button -->
       <button class="btn-cloud-toggle" id="cloudBtn" onclick="openCloudModal()" title="Ultimate Cloud Fallback Settings">
         <span class="cloud-status-dot" id="cloudDot"></span>
         <span>Cloud Fallback</span>
@@ -81,9 +81,9 @@
   <div class="chat-container" id="chatContainer">
     <div class="content-width" id="cardsContainer">
       <div class="hero-box" id="heroBox">
-        <div class="hero-title">VerbaCore Speech Intelligence & Synthesis</div>
+        <div class="hero-title">VerbaCore Speech Intelligence &amp; Synthesis</div>
         <div class="hero-desc">
-          Powered by VerbaCore Studio (Whisper Medium 769M) and Local Brain LLM Reasoning. Resolves colloquial phonetics, dialogue turns, and code-switching with superior grammatical accuracy.
+          Powered by <span id="heroModelLabel">faster-whisper Small (High Accuracy &bull; 244M)</span> (with selectable local &amp; cloud models) and Local Brain LLM Reasoning. Resolves colloquial phonetics, dialogue turns, and code-switching with superior grammatical accuracy.
         </div>
       </div>
     </div>
@@ -136,13 +136,14 @@
     <div style="font-size:12px; color:var(--text-muted); margin-bottom:16px; line-height:1.5;">
       Local transcription runs on this computer. Cloud transcription sends the recording to the selected provider. Automatic cloud fallback is off by default; manual cloud retries always ask for confirmation.
     </div>
+    <div id="cloudModalNotice" class="modal-msg error" style="display:none; margin-bottom:12px; width:100%; box-sizing:border-box;"></div>
 
     <div class="modal-section">
       <div class="modal-label">
         <span>Google Gemini Flash API Key</span>
         <span class="tier-tag">1,500 Req / Day Free</span>
       </div>
-      <input type="password" id="geminiKeyInput" class="modal-input" placeholder="AIzaSy... (from aistudio.google.com)">
+      <input type="password" id="geminiKeyInput" class="modal-input" placeholder="AIzaSy... (from aistudio.google.com)" autocomplete="off">
       <div class="modal-help">
         Free tier: 15 RPM, 1,500 RPD, 1M TPM. Native audio understanding & timestamping. Zero credit card needed.
       </div>
@@ -157,7 +158,7 @@
         <span>Groq Cloud API Key</span>
         <span class="tier-tag">7,200 Audio Sec / Hr Free</span>
       </div>
-      <input type="password" id="groqKeyInput" class="modal-input" placeholder="gsk_... (from console.groq.com)">
+      <input type="password" id="groqKeyInput" class="modal-input" placeholder="gsk_... (from console.groq.com)" autocomplete="off">
       <div class="modal-help">
         Free tier: Whisper Large V3 Turbo running on Groq LPUs at 200x realtime.
       </div>

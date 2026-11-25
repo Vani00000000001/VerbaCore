@@ -101,7 +101,7 @@ Cloud transcription is **100% optional**. You do not need any API key to use Ver
 
 If you wish to enable cloud fallback for difficult audio recordings:
 - Open the web UI at `http://127.0.0.1:7860`.
-- Click **Cloud Settings** in the top navigation bar.
+- Click **Cloud Fallback** in the top navigation bar.
 - Enter your **Google Gemini** or **Groq** API key and save.
 - Settings are saved locally in your private `cloud_config.json` (gitignored).
 
@@ -141,6 +141,4 @@ llama-server -m models/qwen2.5-1.5b-instruct-q4_k_m.gguf --port 8080 -c 4096 --t
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License (see `pyproject.toml`).

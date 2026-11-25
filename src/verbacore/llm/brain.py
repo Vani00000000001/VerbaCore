@@ -10,7 +10,8 @@ from verbacore.config import AppConfig
 def analyze_conversation_with_brain_llm(
     segments: List[Dict[str, Any]],
     duration_sec: float,
-    config: Optional[AppConfig] = None
+    config: Optional[AppConfig] = None,
+    auto_start: bool = True
 ) -> Dict[str, Any]:
     """
     Calls the local Brain LLM (Ollama or llama-server) to perform:
@@ -91,13 +92,15 @@ Output strictly valid JSON:
         ("llama-server", "http://127.0.0.1:8080/v1/chat/completions")
     ])
 
-    # If neither endpoint is responding, attempt auto-launch via LLM manager
-    try:
-        from verbacore.llm.manager import ensure_brain_llm_active
-        ensure_brain_llm_active(config)
-    except Exception as e:
-        print(f"[Brain LLM] LLM auto-start check: {e}")
+    # If neither endpoint is responding, attempt auto-launch via LLM manager (unless disabled)
+    if auto_start:
+        try:
+            from verbacore.llm.manager import ensure_brain_llm_active
+            ensure_brain_llm_active(config)
+        except Exception as e:
+            print(f"[Brain LLM] LLM auto-start check: {e}")
 
+    req_timeout = 30 if auto_start else 3
     for name, endpoint in endpoints:
         try:
             req = urllib.request.Request(
@@ -105,7 +108,7 @@ Output strictly valid JSON:
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"}
             )
-            with urllib.request.urlopen(req, timeout=30) as res:
+            with urllib.request.urlopen(req, timeout=req_timeout) as res:
                 resp_data = json.loads(res.read().decode("utf-8"))
                 raw_content = resp_data["choices"][0]["message"]["content"]
                 match = re.search(r'\{.*\}', raw_content, re.DOTALL)

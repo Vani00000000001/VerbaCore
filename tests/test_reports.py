@@ -64,6 +64,22 @@ def test_docx_reports(tmp_path, sample_data):
     assert docx_trans.is_file()
     assert docx_trans.stat().st_size > 500
 
-    render_docx_executive_report("test_meeting.wav", "rep12345", 6.0, ["en", "ta"], segments, brain, docx_exec)
-    assert docx_exec.is_file()
-    assert docx_exec.stat().st_size > 500
+def test_pdf_reports_xml_characters_and_unsafe_filename(tmp_path, sample_data):
+    if not HAVE_REPORTLAB:
+        pytest.skip("ReportLab not installed")
+    segments = [
+        {"start": 0.0, "end": 2.0, "speaker": "Speaker <1>", "lang": "en", "text": "R&D <test> 5 > 3", "cleaned_text": "R&D <test> 5 > 3"}
+    ]
+    brain = {
+        "executive_summary": "Discussion on A&B <script>alert(1)</script>.",
+        "key_takeaways": ["Item 1 & Item 2"],
+        "action_items": ["Check x < y"],
+        "speaker_count": 1
+    }
+    pdf_trans = tmp_path / "xml_transcript.pdf"
+    pdf_exec = tmp_path / "xml_exec.pdf"
+    render_pdf_transcript("../../Q&A_<test>.wav", "rep12345", 2.0, ["en"], segments, pdf_trans)
+    render_pdf_executive_report("../../Q&A_<test>.wav", "rep12345", 2.0, ["en"], segments, brain, pdf_exec)
+    assert pdf_trans.is_file() and pdf_trans.stat().st_size > 500
+    assert pdf_exec.is_file() and pdf_exec.stat().st_size > 500
+

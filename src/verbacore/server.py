@@ -46,15 +46,29 @@ from verbacore.reports.txt import render_txt_reports, render_srt
 config = load_config()
 app = FastAPI(title="VerbaCore", version="0.2.0")
 
-# CORS Configuration: allow_origins=["*"] is intentional for this local-first desktop application
-# to support connections from local web browsers, sidecars, and desktop frontends.
+# CORS Configuration: restricted to same-origin localhost only. This is a local-first
+# desktop application; arbitrary cross-origin sites must not be able to reach the local
+# API, especially not with credentials, as that exposes cloud keys, recordings, and
+# transcriptions to any site the user visits.
+_host = config.host
+_port = config.port
+_ALLOWED_ORIGINS = {
+    f"http://127.0.0.1:{_port}",
+    f"http://localhost:{_port}",
+}
+if _host not in ("127.0.0.1", "localhost", "0.0.0.0"):
+    _ALLOWED_ORIGINS.add(f"http://{_host}:{_port}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"]
+    allow_origins=sorted(_ALLOWED_ORIGINS),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept", "Origin"],
 )
+
+# Upload safety limits
+MAX_CHUNK_BYTES = 64 * 1024 * 1024  # 64 MB per recording chunk
 
 # Resolve static directory (package root or project root)
 static_dir = Path(__file__).resolve().parent.parent.parent / "static"
@@ -63,6 +77,21 @@ if not static_dir.is_dir():
 
 if static_dir.is_dir():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+
+def _recording_bytes_used(recording_id: str) -> int:
+    """Return total bytes already stored for a recording (chunks + source + mp3)."""
+    directory = get_recording_dir(recording_id)
+    if not directory.is_dir():
+        return 0
+    total = 0
+    for p in directory.rglob("*"):
+        if p.is_file():
+            try:
+                total += p.stat().st_size
+            except OSError:
+                pass
+    return total
 
 
 def assign_speakers(raw_segments: List[Dict[str, Any]], brain_data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -190,16 +219,22 @@ async def get_recording_mp3(recording_id: str):
             media_type="audio/mpeg",
             filename=filename
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[VerbaCore] recording mp3 error: {e!r}")
+        raise HTTPException(status_code=500, detail="Could not prepare recording")
 
 
 @app.delete("/api/recordings/{recording_id}")
 async def remove_recording(recording_id: str):
-    delete_recording(recording_id)
-    return {"status": "ok"}
+    try:
+        delete_recording(recording_id)
+        return {"status": "ok"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/recordings/start")
@@ -216,6 +251,17 @@ async def upload_recording_chunk(recording_id: str, chunk_index: int, request: R
     body = await request.body()
     if not body:
         raise HTTPException(status_code=400, detail="Empty chunk data")
+    if len(body) > MAX_CHUNK_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Chunk exceeds maximum size of {MAX_CHUNK_BYTES // (1024 * 1024)}MB",
+        )
+    used = _recording_bytes_used(recording_id)
+    if used + len(body) > config.max_recording_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Recording exceeds maximum size of {config.max_recording_bytes // (1024 * 1024)}MB",
+        )
     try:
         save_chunk(recording_id, chunk_index, body)
         return {"status": "ok", "chunk": chunk_index}
@@ -225,7 +271,13 @@ async def upload_recording_chunk(recording_id: str, chunk_index: int, request: R
 
 @app.post("/api/recordings/{recording_id}/finalize")
 async def finalize_recording_session(recording_id: str, request: Request):
-    data = await request.json() if await request.body() else {}
+    raw_body = await request.body()
+    try:
+        data = json.loads(raw_body) if raw_body else {}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON request body")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object")
     expected_chunks = data.get("expected_chunks")
     try:
         manifest, source_path = finalize_recording(recording_id, expected_chunks)
@@ -242,13 +294,9 @@ async def finalize_recording_session(recording_id: str, request: Request):
 @app.get("/api/cloud-config")
 async def get_cloud_settings():
     cfg = load_config()
-    gem_key = cfg.gemini_api_key or ""
-    groq_key = cfg.groq_api_key or ""
     return {
-        "has_gemini": bool(gem_key),
-        "has_groq": bool(groq_key),
-        "gemini_masked": (gem_key[:6] + "..." + gem_key[-4:]) if len(gem_key) > 10 else ("***" if gem_key else ""),
-        "groq_masked": (groq_key[:6] + "..." + groq_key[-4:]) if len(groq_key) > 10 else ("***" if groq_key else ""),
+        "has_gemini": bool(cfg.gemini_api_key),
+        "has_groq": bool(cfg.groq_api_key),
         "auto_fallback": cfg.auto_fallback,
         "preferred_cloud": cfg.preferred_cloud
     }
@@ -256,7 +304,12 @@ async def get_cloud_settings():
 
 @app.post("/api/cloud-config")
 async def update_cloud_settings(request: Request):
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON request body")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object")
     config_file = get_data_dir() / "cloud_config.json"
     existing = {}
     if config_file.is_file():
@@ -265,13 +318,15 @@ async def update_cloud_settings(request: Request):
         except Exception:
             pass
 
-    if "gemini_api_key" in data and not data["gemini_api_key"].startswith("***"):
-        existing["gemini_api_key"] = data["gemini_api_key"].strip()
-    if "groq_api_key" in data and not data["groq_api_key"].startswith("***"):
-        existing["groq_api_key"] = data["groq_api_key"].strip()
+    gem_key = data.get("gemini_api_key")
+    if isinstance(gem_key, str) and not gem_key.startswith("***"):
+        existing["gemini_api_key"] = gem_key.strip()
+    groq_key = data.get("groq_api_key")
+    if isinstance(groq_key, str) and not groq_key.startswith("***"):
+        existing["groq_api_key"] = groq_key.strip()
     if "auto_fallback" in data:
         existing["auto_fallback"] = bool(data["auto_fallback"])
-    if "preferred_cloud" in data:
+    if "preferred_cloud" in data and data["preferred_cloud"] in ("gemini", "groq"):
         existing["preferred_cloud"] = str(data["preferred_cloud"])
 
     config_file.write_text(json.dumps(existing, indent=2), encoding="utf-8")
@@ -304,10 +359,15 @@ async def transcribe(
     reports_dir = get_reports_dir()
 
     if recording_id:
-        rec_dir = get_recording_dir(recording_id)
-        source_path = rec_dir / "source.webm"
-        manifest = read_recording_manifest(recording_id)
-        safe_name = manifest.get("display_name", "recording.webm")
+        try:
+            rec_dir = get_recording_dir(recording_id)
+            source_path = rec_dir / "source.webm"
+            manifest = read_recording_manifest(recording_id)
+            safe_name = manifest.get("display_name", "recording.webm")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
     else:
         safe_name = Path(audio.filename or "recording.wav").name
         rec_id, manifest = create_recording(safe_name, audio.content_type or "audio/wav")
@@ -481,7 +541,8 @@ async def transcribe(
             "files": files_map
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[VerbaCore] transcribe error: {e!r}")
+        raise HTTPException(status_code=500, detail="Transcription failed")
 
 
 @app.get("/api/reports/{filename:path}")

@@ -113,7 +113,14 @@ def transcribe_with_gemini(
                             "cleaned_text": txt
                         })
 
-                dur = max((s["end"] for s in raw_segments), default=10.0)
+                if raw_segments:
+                    dur = max(s["end"] for s in raw_segments)
+                else:
+                    try:
+                        from verbacore.utils.audio import get_audio_duration_seconds
+                        dur = get_audio_duration_seconds(audio_path)
+                    except Exception:
+                        dur = 0.0
                 brain_data = {
                     "is_multi_speaker": data.get("is_multi_speaker", False),
                     "speaker_count": data.get("speaker_count", 1),
@@ -192,5 +199,7 @@ def transcribe_with_groq(
                 "cleaned_text": txt
             })
 
-        brain_data = analyze_conversation_with_brain_llm(raw_segments, dur, config=config)
+        brain_data = analyze_conversation_with_brain_llm(
+            raw_segments, dur, config=config, auto_start=False
+        )
         return raw_segments, [lang.upper()], dur, brain_data

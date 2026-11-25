@@ -11,14 +11,74 @@ let unsavedRecordingChunks = [];
 const pendingFileUploads = new Map();
 const RECORDING_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
 
+let cloudConfigState = {
+  loaded: false,
+  has_gemini: false,
+  has_groq: false,
+  auto_fallback: false,
+  preferred_cloud: 'gemini'
+};
+
+async function readJsonSafe(res) {
+  return await res.json().catch(() => null);
+}
+
+function getApiErrorMessage(data, fallback) {
+  if (!data) return fallback;
+  if (typeof data.detail === 'string' && data.detail.trim()) return data.detail;
+  if (Array.isArray(data.detail) && data.detail.length > 0) {
+    const parts = data.detail.map(item => (item && item.msg ? item.msg : String(item))).filter(Boolean);
+    if (parts.length) return parts.join('; ');
+  }
+  if (typeof data.error === 'string' && data.error.trim()) return data.error;
+  if (typeof data.message === 'string' && data.message.trim()) return data.message;
+  return fallback;
+}
+
+function isCloudKeyError(data, message = '') {
+  if (data && data.error_code === 'cloud_key_required') return true;
+  const text = String(message || (data && (data.detail || data.error || data.message)) || '');
+  return /api key/i.test(text) || /cloud_key_required/i.test(text) || (/cloud fallback/i.test(text) && /(key|config|missing|provide|add)/i.test(text));
+}
+
+function inferCloudProvider(data, message = '') {
+  if (data && (data.provider === 'gemini' || data.provider === 'groq')) return data.provider;
+  const text = String(message || (data && (data.detail || data.error || data.message)) || '').toLowerCase();
+  if (text.includes('groq')) return 'groq';
+  if (text.includes('gemini')) return 'gemini';
+  return cloudConfigState.preferred_cloud === 'groq' ? 'groq' : 'gemini';
+}
+
+function createApiError(res, data, fallback) {
+  const message = getApiErrorMessage(data, fallback);
+  const err = new Error(message);
+  err.status = res ? res.status : 0;
+  err.isCloudKeyError = isCloudKeyError(data, message);
+  err.provider = inferCloudProvider(data, message);
+  return err;
+}
+
+function getSelectedModelLabel() {
+  const select = document.getElementById('modelSelect');
+  if (!select || select.selectedIndex < 0) return 'faster-whisper Small (High Accuracy • 244M)';
+  return select.options[select.selectedIndex].text || select.value;
+}
+
+function updateHeroModelLabel() {
+  const el = document.getElementById('heroModelLabel');
+  if (el) el.textContent = getSelectedModelLabel();
+}
+
 async function createSavedRecording(name, mimeType) {
   const res = await fetch('/api/recordings/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, mime_type: mimeType })
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `Could not save recording (HTTP ${res.status})`);
+  const data = await readJsonSafe(res);
+  if (!res.ok || !data || !data.recording_id) {
+    throw createApiError(res, data, `Could not save recording (HTTP ${res.status})`);
+  }
   return data.recording_id;
 }
 
@@ -29,8 +89,8 @@ async function uploadRecordingChunk(recordingId, index, chunk) {
     body: chunk
   });
   if (!res.ok) {
-    const data = await res.json().catch(() => null);
-    throw new Error(data && data.error ? data.error : `Could not save audio chunk ${index + 1}`);
+    const data = await readJsonSafe(res);
+    throw createApiError(res, data, `Could not save audio chunk ${index + 1} (HTTP ${res.status})`);
   }
 }
 
@@ -66,8 +126,8 @@ async function finalizeSavedRecording(recordingId, expectedChunks = null) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ expected_chunks: expectedChunks })
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `Could not finalize recording (HTTP ${res.status})`);
+  const data = await readJsonSafe(res);
+  if (!res.ok) throw createApiError(res, data, `Could not finalize recording (HTTP ${res.status})`);
 }
 
 async function saveFileAsRecording(file, recordingId) {
@@ -140,9 +200,9 @@ function clearResults() {
   const container = document.getElementById('cardsContainer');
   container.innerHTML = `
     <div class="hero-box" id="heroBox">
-      <div class="hero-title">High-Accuracy Voice Transcription & Intelligence</div>
+      <div class="hero-title">VerbaCore Speech Intelligence &amp; Synthesis</div>
       <div class="hero-desc">
-        Powered by Whisper Medium (769M Pro Studio) and Local Brain LLM Reasoning. Resolves colloquial phonetics, dialogue turns, and code-switching with superior grammatical accuracy.
+        Powered by <span id="heroModelLabel">${escapeHtml(getSelectedModelLabel())}</span> (with selectable local &amp; cloud models) and Local Brain LLM Reasoning. Resolves colloquial phonetics, dialogue turns, and code-switching with superior grammatical accuracy.
       </div>
     </div>
   `;
@@ -228,9 +288,19 @@ async function uploadAndTranscribe(file, savedRecordingId = null, savedRecording
   const displayName = file ? file.name : savedRecordingName;
   const modelSize = document.getElementById('modelSelect').value;
   if (modelSize === 'cloud_gemini' || modelSize === 'cloud_groq') {
-    const providerName = modelSize === 'cloud_gemini' ? 'Google Gemini' : 'Groq';
+    if (!cloudConfigState.loaded) await fetchCloudConfig();
+    const provider = modelSize === 'cloud_gemini' ? 'gemini' : 'groq';
+    const providerName = provider === 'gemini' ? 'Google Gemini' : 'Groq';
+    const hasKey = provider === 'gemini' ? cloudConfigState.has_gemini : cloudConfigState.has_groq;
+    if (cloudConfigState.loaded && !hasKey) {
+      const promptMsg = `${providerName} API key is not configured. Please add your ${providerName} API key in Cloud Fallback settings.`;
+      alert(promptMsg);
+      openCloudModal(provider, promptMsg);
+      return;
+    }
     if (!confirm(`This sends the audio to ${providerName} for cloud transcription. The audio may contain confidential information.\n\nContinue?`)) return;
   }
+  const selectedModelLabel = getSelectedModelLabel();
   const statusInput = document.getElementById('statusInput');
   if (statusInput) statusInput.value = "Saving & Transcribing: " + displayName + "...";
 
@@ -244,7 +314,7 @@ async function uploadAndTranscribe(file, savedRecordingId = null, savedRecording
         <div>
           <b style="font-size:15px; color:#FFFFFF;">${escapeHtml(displayName)}</b>
           <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
-            Processing with VerbaCore Engine (Whisper Medium & Brain LLM Reasoning)...
+            Processing with ${escapeHtml(selectedModelLabel)} &amp; Brain LLM Reasoning...
           </div>
         </div>
         <div class="spinner"></div>
@@ -259,20 +329,22 @@ async function uploadAndTranscribe(file, savedRecordingId = null, savedRecording
   formData.append('model', modelSize);
   formData.append('language_mode', langMode);
   let recordingId = savedRecordingId;
+  let fileSaved = Boolean(savedRecordingId);
 
   try {
     if (!recordingId) {
       recordingId = await createSavedRecording(file.name, file.type || 'application/octet-stream');
       await saveFileAsRecording(file, recordingId);
+      fileSaved = true;
     }
     formData.append('recording_id', recordingId);
     const res = await fetch('/api/transcribe', {
       method: 'POST',
       body: formData
     });
-    const data = await res.json().catch(() => null);
+    const data = await readJsonSafe(res);
     if (!res.ok) {
-      throw new Error(data && data.error ? data.error : `Upload failed (HTTP ${res.status})`);
+      throw createApiError(res, data, `Upload failed (HTTP ${res.status})`);
     }
     if (!data) {
       throw new Error('The server returned an invalid response.');
@@ -282,11 +354,24 @@ async function uploadAndTranscribe(file, savedRecordingId = null, savedRecording
       addHistoryItem(displayName, data.duration_formatted, cardId);
       loadSavedRecordings();
     } else {
-      renderErrorCard(cardId, displayName, data.error || 'Transcription failed', data.recording_id || recordingId);
+      const errMsg = getApiErrorMessage(data, 'Transcription failed');
+      const missingKey = isCloudKeyError(data, errMsg);
+      const provider = inferCloudProvider(data, errMsg);
+      renderErrorCard(cardId, displayName, errMsg, data.recording_id || recordingId, {
+        isCloudKeyError: missingKey,
+        provider
+      });
+      if (missingKey) openCloudModal(provider, errMsg);
     }
   } catch (err) {
-    if (file && recordingId) pendingFileUploads.set(recordingId, file);
-    renderErrorCard(cardId, displayName, err.message, recordingId);
+    if (file && recordingId && !fileSaved) pendingFileUploads.set(recordingId, file);
+    const missingKey = Boolean(err.isCloudKeyError || isCloudKeyError(null, err.message));
+    const provider = err.provider || inferCloudProvider(null, err.message);
+    renderErrorCard(cardId, displayName, err.message, recordingId, {
+      isCloudKeyError: missingKey,
+      provider
+    });
+    if (missingKey) openCloudModal(provider, err.message);
   } finally {
     if (statusInput) statusInput.value = "";
   }
@@ -437,8 +522,14 @@ function renderSuccessCard(cardId, filename, data) {
   `;
 }
 
-function renderErrorCard(cardId, filename, error, recordingId = null) {
+function renderErrorCard(cardId, filename, error, recordingId = null, options = {}) {
   const card = document.getElementById(cardId);
+  const showCloudKeyBtn = Boolean(options.isCloudKeyError || isCloudKeyError(null, error));
+  const rawProvider = options.provider || inferCloudProvider(null, error);
+  const provider = rawProvider === 'groq' ? 'groq' : 'gemini';
+  const cloudKeyButton = showCloudKeyBtn
+    ? `<button class="btn-action btn-primary" onclick="openCloudModal('${provider}')">Configure Cloud API Key</button>`
+    : '';
   const retryFileButton = recordingId && pendingFileUploads.has(recordingId)
     ? `<button class="btn-action" onclick="retryFileUpload('${recordingId}', decodeURIComponent('${encodeJsString(filename)}'), '${cardId}')">Retry saving original file</button>`
     : '';
@@ -453,7 +544,8 @@ function renderErrorCard(cardId, filename, error, recordingId = null) {
       <span style="font-size:12px; color:#F87171;">Error</span>
     </div>
     <div style="font-size:13px; color:#CBD5E1;">${escapeHtml(error)}</div>
-    ${recordingId ? `<div class="action-bar">
+    ${(recordingId || showCloudKeyBtn) ? `<div class="action-bar">
+      ${cloudKeyButton}
       ${retryFileButton}
       ${finalizedActions}
     </div>` : ''}
@@ -475,7 +567,15 @@ async function retryFileUpload(recordingId, filename, cardId) {
 }
 
 async function retrySavedRecording(recordingId, filename, provider, cardId) {
+  if (!cloudConfigState.loaded) await fetchCloudConfig();
   const providerName = provider === 'gemini' ? 'Google Gemini' : 'Groq';
+  const hasKey = provider === 'gemini' ? cloudConfigState.has_gemini : cloudConfigState.has_groq;
+  if (cloudConfigState.loaded && !hasKey) {
+    const promptMsg = `${providerName} API key is not configured. Please add your ${providerName} API key in Cloud Fallback settings.`;
+    alert(promptMsg);
+    openCloudModal(provider, promptMsg);
+    return;
+  }
   if (!confirm(`This sends the saved recording to ${providerName} for cloud transcription. The audio may contain confidential information.\n\nContinue?`)) return;
 
   const targetCardId = cardId || `card_${Date.now()}`;
@@ -496,13 +596,19 @@ async function retrySavedRecording(recordingId, filename, provider, cardId) {
   formData.append('language_mode', document.getElementById('langSelect').value);
   try {
     const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data) throw new Error(data && data.error ? data.error : `Cloud retry failed (HTTP ${res.status})`);
-    if (data.status !== 'success') throw new Error(data.error || 'Cloud retry failed');
+    const data = await readJsonSafe(res);
+    if (!res.ok || !data) throw createApiError(res, data, `Cloud retry failed (HTTP ${res.status})`);
+    if (data.status !== 'success') throw createApiError(res, data, 'Cloud retry failed');
     renderSuccessCard(targetCardId, filename, data);
     loadSavedRecordings();
   } catch (error) {
-    renderErrorCard(targetCardId, filename, error.message, recordingId);
+    const missingKey = Boolean(error.isCloudKeyError || isCloudKeyError(null, error.message));
+    const targetProvider = error.provider || provider;
+    renderErrorCard(targetCardId, filename, error.message, recordingId, {
+      isCloudKeyError: missingKey,
+      provider: targetProvider
+    });
+    if (missingKey) openCloudModal(targetProvider, error.message);
   }
 }
 
@@ -522,8 +628,10 @@ async function loadSavedRecordings() {
   if (!list) return;
   try {
     const res = await fetch('/api/recordings');
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `Could not load recordings (HTTP ${res.status})`);
+    const data = await readJsonSafe(res);
+    if (!res.ok || !data || !Array.isArray(data.recordings)) {
+      throw createApiError(res, data, `Could not load recordings (HTTP ${res.status})`);
+    }
     if (!data.recordings.length) {
       list.innerHTML = '<div style="font-size:12px; color:var(--text-dim); padding:10px 8px;">No saved recordings</div>';
       return;
@@ -571,33 +679,60 @@ function copyTranscript(cardId) {
 }
 
 // --- Cloud Fallback Settings JS ---
-function openCloudModal() {
+function openCloudModal(focusProvider = null, promptMessage = '') {
   fetchCloudConfig();
+  const notice = document.getElementById('cloudModalNotice');
+  if (notice) {
+    if (promptMessage) {
+      notice.textContent = promptMessage;
+      notice.style.display = 'block';
+    } else {
+      notice.textContent = '';
+      notice.style.display = 'none';
+    }
+  }
   document.getElementById('cloudModal').classList.add('open');
+  if (focusProvider === 'gemini' || focusProvider === 'groq') {
+    const inputId = focusProvider === 'gemini' ? 'geminiKeyInput' : 'groqKeyInput';
+    setTimeout(() => {
+      const inputEl = document.getElementById(inputId);
+      if (inputEl) inputEl.focus();
+    }, 50);
+  }
 }
 
 function closeCloudModal() {
   document.getElementById('cloudModal').classList.remove('open');
+  const notice = document.getElementById('cloudModalNotice');
+  if (notice) {
+    notice.textContent = '';
+    notice.style.display = 'none';
+  }
 }
 
 async function fetchCloudConfig() {
   try {
     const res = await fetch('/api/cloud-config');
-    const cfg = await res.json();
+    const cfg = await readJsonSafe(res);
+    if (!res.ok || !cfg) return;
+    cloudConfigState = {
+      loaded: true,
+      has_gemini: Boolean(cfg.has_gemini),
+      has_groq: Boolean(cfg.has_groq),
+      auto_fallback: Boolean(cfg.auto_fallback),
+      preferred_cloud: cfg.preferred_cloud || 'gemini'
+    };
     const dot = document.getElementById('cloudDot');
     if (dot) {
-      if (cfg.has_gemini || cfg.has_groq) {
+      if (cloudConfigState.has_gemini || cloudConfigState.has_groq) {
         dot.classList.add('active');
       } else {
         dot.classList.remove('active');
       }
     }
-    const gemInput = document.getElementById('geminiKeyInput');
-    const groqInput = document.getElementById('groqKeyInput');
     const autoCheck = document.getElementById('autoFallbackCheck');
-    if (gemInput && cfg.gemini_masked) gemInput.value = cfg.gemini_masked;
-    if (groqInput && cfg.groq_masked) groqInput.value = cfg.groq_masked;
-    if (autoCheck) autoCheck.checked = cfg.auto_fallback !== false;
+    // API keys are never echoed back by the API; password fields stay empty when the modal opens.
+    if (autoCheck) autoCheck.checked = Boolean(cfg.auto_fallback);
   } catch (err) {
     console.warn("Could not fetch cloud config:", err);
   }
@@ -620,13 +755,15 @@ async function saveCloudConfigSettings() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    const data = await res.json();
-    if (data.status === 'ok') {
+    const data = await readJsonSafe(res);
+    if (res.ok && data && data.status === 'ok') {
       alert('Cloud fallback settings saved successfully!');
-      fetchCloudConfig();
+      await fetchCloudConfig();
+      document.getElementById('geminiKeyInput').value = '';
+      document.getElementById('groqKeyInput').value = '';
       closeCloudModal();
     } else {
-      alert('Error saving settings: ' + (data.message || 'Unknown error'));
+      alert('Error saving settings: ' + getApiErrorMessage(data, `HTTP ${res.status}`));
     }
   } catch (err) {
     alert('Failed to save cloud config: ' + err.message);
@@ -649,14 +786,14 @@ async function testCloudKey(provider) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider: provider, key: val })
     });
-    const data = await res.json();
-    if (data.success) {
+    const data = await readJsonSafe(res);
+    if (res.ok && data && data.success) {
       resEl.className = 'modal-msg success';
-      resEl.innerText = data.message;
+      resEl.innerText = data.message || 'Connection successful';
       fetchCloudConfig();
     } else {
       resEl.className = 'modal-msg error';
-      resEl.innerText = (data.message || 'Connection failed');
+      resEl.innerText = getApiErrorMessage(data, `Connection failed (HTTP ${res.status})`);
     }
   } catch (err) {
     resEl.className = 'modal-msg error';
@@ -666,6 +803,9 @@ async function testCloudKey(provider) {
 
 // Initial fetch on page load
 document.addEventListener('DOMContentLoaded', () => {
+  updateHeroModelLabel();
+  const modelSelect = document.getElementById('modelSelect');
+  if (modelSelect) modelSelect.addEventListener('change', updateHeroModelLabel);
   fetchCloudConfig();
   loadSavedRecordings();
 });

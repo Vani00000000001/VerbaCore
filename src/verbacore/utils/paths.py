@@ -1,6 +1,39 @@
 import os
 import platform
+import re
 from pathlib import Path
+from typing import Any, Optional
+
+_XML_INVALID_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_UNSAFE_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]+')
+
+
+def strip_xml_control_chars(value: Any) -> str:
+    """Remove characters forbidden in XML 1.0 (preserving tab, LF, CR)."""
+    text = "" if value is None else str(value)
+    return _XML_INVALID_CTRL_RE.sub("", text)
+
+
+def sanitize_display_filename(filename: Optional[str], fallback: str = "recording") -> str:
+    """Return a clean single-component filename stripped of directories and control chars."""
+    raw = strip_xml_control_chars("" if filename is None else str(filename)).strip()
+    raw = raw.replace("\r", "_").replace("\n", "_").replace("\t", "_")
+    base = raw.replace("\\", "/").split("/")[-1].strip()
+    if not base or base in {".", ".."}:
+        return fallback
+    return base[:180]
+
+
+def sanitize_filename(filename: Optional[str], fallback: str = "recording") -> str:
+    """Sanitize a filename to be safe across filesystems and report templates."""
+    base = sanitize_display_filename(filename, fallback=fallback)
+    cleaned = _UNSAFE_FILENAME_CHARS_RE.sub("_", base)
+    while ".." in cleaned:
+        cleaned = cleaned.replace("..", "_")
+    cleaned = cleaned.strip(". ")
+    if not cleaned:
+        return fallback
+    return cleaned[:180]
 
 
 def get_project_root() -> Path:

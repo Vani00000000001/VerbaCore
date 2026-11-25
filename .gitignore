@@ -25,18 +25,18 @@ cloud_config.json
 verba-core.toml
 
 # Local runtime data & user storage
-data/
-uploads/
-recordings/
-reports/
-checkpoints/
+/data/
+/uploads/
+/recordings/
+/reports/
+/checkpoints/
 *.webm
 *.wav
 *.mp3
 
 # Model weights & binary caches
-models/
-blobs/
+/models/
+/blobs/
 *.bin
 *.gguf
 *.onnx

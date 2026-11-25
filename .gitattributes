@@ -1,0 +1,11 @@
+# Auto-detect text files and normalize line endings in the index
+* text=auto
+
+# Ensure shell scripts always use LF (required on Linux/macOS/WSL)
+launch.sh text eol=lf
+scripts/launch.sh text eol=lf
+scripts/install-models.sh text eol=lf
+*.sh text eol=lf
+
+# Ensure Windows batch scripts use CRLF
+*.bat text eol=crlf

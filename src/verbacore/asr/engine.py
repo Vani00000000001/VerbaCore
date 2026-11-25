@@ -183,16 +183,23 @@ def transcribe_audio_turns(
                         'text': cleaned_text
                     })
 
-    # 4. Character-script validation
+    final_langs = detect_verified_languages(raw_segments, detected_languages)
+    return raw_segments, final_langs, duration_s
+
+
+def detect_verified_languages(
+    raw_segments: List[Dict[str, Any]],
+    detected_languages: Set[str]
+) -> List[str]:
+    """Validate detected languages against Unicode character scripts in transcribed text."""
     verified_langs: Set[str] = set()
     for s in raw_segments:
-        t = s['text']
-        if any('஀' <= c <= '௿' for c in t):
+        t = s.get('text', '')
+        if any('\u0b80' <= c <= '\u0bff' for c in t):
             verified_langs.add("TAMIL")
-        if any('a' <= c.lower() <= 'z' for c in t):
+        if any('a' <= c.lower() <= 'z' or '\u00c0' <= c <= '\u024f' for c in t):
             verified_langs.add("ENGLISH")
-        if any('ऀ' <= c <= 'ॿ' for c in t):
+        if any('\u0900' <= c <= '\u097f' for c in t):
             verified_langs.add("HINDI")
 
-    final_langs = list(verified_langs) if verified_langs else [l.upper() for l in detected_languages]
-    return raw_segments, final_langs, duration_s
+    return sorted(verified_langs) if verified_langs else sorted(l.upper() for l in detected_languages)
