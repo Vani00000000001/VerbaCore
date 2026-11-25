@@ -1,12 +1,12 @@
-import os
 from pathlib import Path
+
 from verbacore.utils.paths import (
     get_data_dir,
+    get_font_search_paths,
     get_models_dir,
-    get_uploads_dir,
-    get_reports_dir,
     get_recordings_dir,
-    get_font_search_paths
+    get_reports_dir,
+    get_uploads_dir,
 )
 
 

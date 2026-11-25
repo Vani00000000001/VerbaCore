@@ -2,7 +2,7 @@ import os
 import platform
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 _XML_INVALID_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _UNSAFE_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]+')
@@ -14,7 +14,7 @@ def strip_xml_control_chars(value: Any) -> str:
     return _XML_INVALID_CTRL_RE.sub("", text)
 
 
-def sanitize_display_filename(filename: Optional[str], fallback: str = "recording") -> str:
+def sanitize_display_filename(filename: str | None, fallback: str = "recording") -> str:
     """Return a clean single-component filename stripped of directories and control chars."""
     raw = strip_xml_control_chars("" if filename is None else str(filename)).strip()
     raw = raw.replace("\r", "_").replace("\n", "_").replace("\t", "_")
@@ -24,7 +24,7 @@ def sanitize_display_filename(filename: Optional[str], fallback: str = "recordin
     return base[:180]
 
 
-def sanitize_filename(filename: Optional[str], fallback: str = "recording") -> str:
+def sanitize_filename(filename: str | None, fallback: str = "recording") -> str:
     """Sanitize a filename to be safe across filesystems and report templates."""
     base = sanitize_display_filename(filename, fallback=fallback)
     cleaned = _UNSAFE_FILENAME_CHARS_RE.sub("_", base)
@@ -95,7 +95,7 @@ def get_recordings_dir() -> Path:
 
 def get_font_search_paths() -> list[Path]:
     """Return font candidate paths in priority order across OS platforms."""
-    candidates = []
+    candidates: list[Path] = []
 
     # Bundled font directory inside package
     bundled = Path(__file__).resolve().parent.parent / "resources" / "fonts"
@@ -107,25 +107,31 @@ def get_font_search_paths() -> list[Path]:
     system = platform.system()
     if system == "Windows":
         win_fonts = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
-        candidates.extend([
-            win_fonts / "segoeui.ttf",
-            win_fonts / "Nirmala.ttc",
-            win_fonts / "arial.ttf",
-            win_fonts / "calibri.ttf"
-        ])
+        candidates.extend(
+            [
+                win_fonts / "segoeui.ttf",
+                win_fonts / "Nirmala.ttc",
+                win_fonts / "arial.ttf",
+                win_fonts / "calibri.ttf",
+            ]
+        )
     elif system == "Darwin":
-        candidates.extend([
-            Path("/Library/Fonts/Arial.ttf"),
-            Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
-            Path("/System/Library/Fonts/Helvetica.ttc"),
-            Path("/Library/Fonts/NotoSans-Regular.ttf")
-        ])
+        candidates.extend(
+            [
+                Path("/Library/Fonts/Arial.ttf"),
+                Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
+                Path("/System/Library/Fonts/Helvetica.ttc"),
+                Path("/Library/Fonts/NotoSans-Regular.ttf"),
+            ]
+        )
     else:
-        candidates.extend([
-            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-            Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
-            Path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
-            Path("/usr/share/fonts/opentype/noto/NotoSansTamil-Regular.otf")
-        ])
+        candidates.extend(
+            [
+                Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+                Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
+                Path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
+                Path("/usr/share/fonts/opentype/noto/NotoSansTamil-Regular.otf"),
+            ]
+        )
 
     return [p for p in candidates if p.is_file()]

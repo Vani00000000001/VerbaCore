@@ -1,6 +1,4 @@
-import io
 import json
-from pathlib import Path
 import urllib.request
 
 from verbacore.config import AppConfig
@@ -35,13 +33,13 @@ def test_gemini_empty_segments_uses_actual_duration(tmp_path, monkeypatch):
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
-        lambda req, timeout=120: _DummyResp({
-            "candidates": [{"content": {"parts": [{"text": json.dumps({"segments": []})}]}}]
-        }),
+        lambda req, timeout=120: _DummyResp(
+            {"candidates": [{"content": {"parts": [{"text": json.dumps({"segments": []})}]}}]}
+        ),
     )
     monkeypatch.setattr("verbacore.utils.audio.get_audio_duration_seconds", lambda p: 42.5)
 
-    segs, langs, dur, _ = cloud.transcribe_with_gemini(audio, "fake-key")
+    segs, _langs, dur, _ = cloud.transcribe_with_gemini(audio, "fake-key")
     assert segs == []
     assert dur == 42.5
 
@@ -53,11 +51,13 @@ def test_groq_cloud_does_not_autostart_local_llm(tmp_path, monkeypatch):
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
-        lambda req, timeout=60: _DummyResp({
-            "duration": 5.0,
-            "language": "en",
-            "segments": [{"start": 0.0, "end": 2.0, "text": "Hello cloud."}],
-        }),
+        lambda req, timeout=60: _DummyResp(
+            {
+                "duration": 5.0,
+                "language": "en",
+                "segments": [{"start": 0.0, "end": 2.0, "text": "Hello cloud."}],
+            }
+        ),
     )
 
     called = {}
@@ -74,7 +74,7 @@ def test_groq_cloud_does_not_autostart_local_llm(tmp_path, monkeypatch):
         }
 
     monkeypatch.setattr(cloud, "analyze_conversation_with_brain_llm", fake_brain)
-    segs, langs, dur, _ = cloud.transcribe_with_groq(audio, "fake-key", config=AppConfig())
+    segs, _langs, dur, _ = cloud.transcribe_with_groq(audio, "fake-key", config=AppConfig())
     assert called["auto_start"] is False
     assert dur == 5.0
     assert len(segs) == 1

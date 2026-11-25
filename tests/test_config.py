@@ -1,4 +1,4 @@
-from verbacore.config import load_config, AppConfig
+from verbacore.config import AppConfig, load_config
 
 
 def test_default_config():

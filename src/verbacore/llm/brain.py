@@ -1,18 +1,18 @@
 import json
 import re
-import urllib.request
 import urllib.error
-from typing import List, Dict, Any, Optional
+import urllib.request
+from typing import Any
 
 from verbacore.config import AppConfig
 
 
 def analyze_conversation_with_brain_llm(
-    segments: List[Dict[str, Any]],
+    segments: list[dict[str, Any]],
     duration_sec: float,
-    config: Optional[AppConfig] = None,
-    auto_start: bool = True
-) -> Dict[str, Any]:
+    config: AppConfig | None = None,
+    auto_start: bool = True,
+) -> dict[str, Any]:
     """
     Calls the local Brain LLM (Ollama or llama-server) to perform:
     1. Single Speaker vs. Multi-Speaker Diarization with Bilingual Code-Switching awareness.
@@ -23,14 +23,14 @@ def analyze_conversation_with_brain_llm(
         f"[{s['start']}s - {s['end']}s] ({s.get('lang', 'text')}): {s['text']}" for s in segments
     )
 
-    sentences = [s['text'].strip() for s in segments if len(s['text'].strip()) > 3]
+    sentences = [s["text"].strip() for s in segments if len(s["text"].strip()) > 3]
     default_overview = f"Audio recording analyzed over {int(duration_sec)} seconds."
     if sentences:
         default_overview += f" The discussion centers on: {sentences[0]}"
         if len(sentences) > 1:
             default_overview += f" with follow-up points including: {sentences[1]}"
     default_takeaways = [s for s in sentences[:3]] if sentences else ["Spoken dialogue recorded."]
-    detected_langs = list(dict.fromkeys(s.get('lang', 'en').upper() for s in segments))
+    detected_langs = list(dict.fromkeys(s.get("lang", "en").upper() for s in segments))
 
     prompt = f"""You are an elite linguistic conversation analyst and diarization AI for VerbaCore.
 You excel at understanding bilingual code-switching (e.g. Tanglish, Hinglish) and distinguishing single-speaker monologues from multi-party conversations.
@@ -73,45 +73,48 @@ Output strictly valid JSON:
         "messages": [
             {
                 "role": "system",
-                "content": "You are a professional executive conversation analyst. Return ONLY strictly valid JSON. Never output placeholder dots or ellipses."
+                "content": "You are a professional executive conversation analyst. Return ONLY strictly valid JSON. Never output placeholder dots or ellipses.",
             },
-            {"role": "user", "content": prompt}
+            {"role": "user", "content": prompt},
         ],
         "temperature": 0.1,
         "max_tokens": 450,
         "format": "json",
-        "stream": False
+        "stream": False,
     }
 
     endpoints = []
     if config and config.brain_llm_url:
         base = config.brain_llm_url.rstrip("/")
         endpoints.append(("Configured LLM", f"{base}/v1/chat/completions"))
-    endpoints.extend([
-        ("Ollama", "http://127.0.0.1:11434/v1/chat/completions"),
-        ("llama-server", "http://127.0.0.1:8080/v1/chat/completions")
-    ])
+    endpoints.extend(
+        [
+            ("Ollama", "http://127.0.0.1:11434/v1/chat/completions"),
+            ("llama-server", "http://127.0.0.1:8080/v1/chat/completions"),
+        ]
+    )
 
     # If neither endpoint is responding, attempt auto-launch via LLM manager (unless disabled)
     if auto_start:
         try:
             from verbacore.llm.manager import ensure_brain_llm_active
+
             ensure_brain_llm_active(config)
         except Exception as e:
             print(f"[Brain LLM] LLM auto-start check: {e}")
 
     req_timeout = 30 if auto_start else 3
-    for name, endpoint in endpoints:
+    for _name, endpoint in endpoints:
         try:
             req = urllib.request.Request(
                 endpoint,
                 data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"}
+                headers={"Content-Type": "application/json"},
             )
             with urllib.request.urlopen(req, timeout=req_timeout) as res:
                 resp_data = json.loads(res.read().decode("utf-8"))
                 raw_content = resp_data["choices"][0]["message"]["content"]
-                match = re.search(r'\{.*\}', raw_content, re.DOTALL)
+                match = re.search(r"\{.*\}", raw_content, re.DOTALL)
                 if match:
                     data = json.loads(match.group(0))
                     summary = str(data.get("executive_summary", "")).strip()
@@ -121,14 +124,16 @@ Output strictly valid JSON:
 
                     takeaways = data.get("key_takeaways", [])
                     cleaned_takeaways = [
-                        t.strip() for t in takeaways
+                        t.strip()
+                        for t in takeaways
                         if isinstance(t, str) and "..." not in t and len(t.strip()) > 3
                     ]
                     data["key_takeaways"] = cleaned_takeaways or default_takeaways
 
                     actions = data.get("action_items", [])
                     cleaned_actions = [
-                        a.strip() for a in actions
+                        a.strip()
+                        for a in actions
                         if isinstance(a, str) and "..." not in a and len(a.strip()) > 3
                     ]
                     data["action_items"] = cleaned_actions or ["No explicit action items recorded."]
@@ -138,9 +143,11 @@ Output strictly valid JSON:
 
     # Heuristic fallback if LLM is offline
     is_multi = (
-        len(segments) >= 4 and
-        duration_sec > 20 and
-        any(segments[i]['start'] - segments[i-1]['end'] > 1.8 for i in range(1, len(segments)))
+        len(segments) >= 4
+        and duration_sec > 20
+        and any(
+            segments[i]["start"] - segments[i - 1]["end"] > 1.8 for i in range(1, len(segments))
+        )
     )
 
     return {
@@ -149,5 +156,5 @@ Output strictly valid JSON:
         "languages": detected_langs or ["en"],
         "executive_summary": default_overview,
         "key_takeaways": default_takeaways,
-        "action_items": ["Review dialogue highlights and action points."]
+        "action_items": ["Review dialogue highlights and action points."],
     }

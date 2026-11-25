@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Optional
+
 from pydantic import BaseModel, Field
 
 from verbacore.utils.paths import get_data_dir, get_project_root
@@ -13,31 +13,31 @@ logger = logging.getLogger(__name__)
 class AppConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 7860
-    
+
     # LLM Settings
     brain_llm_url: str = Field(
         default="http://127.0.0.1:11434",
-        description="Ollama or llama-server base endpoint"
+        description="Ollama or llama-server base endpoint",
     )
     brain_llm_model: str = "qwen2.5:1.5b"
-    llama_server_path: Optional[str] = None
-    gguf_model_path: Optional[str] = None
-    
+    llama_server_path: str | None = None
+    gguf_model_path: str | None = None
+
     # ASR Settings
     default_whisper_model: str = "small"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
     whisper_threads: int = 4
-    
+
     # Limits
     max_upload_bytes: int = 100 * 1024 * 1024
     max_recording_bytes: int = 2 * 1024 * 1024 * 1024
     max_chunk_bytes: int = 16 * 1024 * 1024
     cloud_chunk_seconds: int = 600
-    
+
     # Cloud API Keys
-    gemini_api_key: Optional[str] = None
-    groq_api_key: Optional[str] = None
+    gemini_api_key: str | None = None
+    groq_api_key: str | None = None
     auto_fallback: bool = False
     preferred_cloud: str = "gemini"
 
@@ -60,7 +60,12 @@ def load_config() -> AppConfig:
                 if not isinstance(data, dict):
                     logger.warning("Ignoring invalid cloud config in %s: expected JSON object", p)
                     continue
-                for field_name in ("gemini_api_key", "groq_api_key", "llama_server_path", "gguf_model_path"):
+                for field_name in (
+                    "gemini_api_key",
+                    "groq_api_key",
+                    "llama_server_path",
+                    "gguf_model_path",
+                ):
                     val = data.get(field_name)
                     if isinstance(val, str) and val.strip():
                         setattr(cfg, field_name, val.strip())
@@ -70,7 +75,13 @@ def load_config() -> AppConfig:
                 if isinstance(pref, str) and pref.strip():
                     cfg.preferred_cloud = pref.strip()
                 break
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
+            except (
+                OSError,
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                ValueError,
+                TypeError,
+            ) as exc:
                 logger.warning("Failed to load cloud config from %s: %s", p, exc)
 
     # Environment variables override

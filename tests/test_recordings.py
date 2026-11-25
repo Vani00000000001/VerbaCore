@@ -1,14 +1,12 @@
 import pytest
-from pathlib import Path
+
 from verbacore.recordings.manager import (
     create_recording,
-    save_chunk,
-    finalize_recording,
-    read_recording_manifest,
-    save_recording_manifest,
-    list_saved_recordings,
     delete_recording,
-    get_recording_dir
+    finalize_recording,
+    get_recording_dir,
+    read_recording_manifest,
+    save_chunk,
 )
 
 

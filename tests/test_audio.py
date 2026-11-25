@@ -1,8 +1,12 @@
 import struct
 import wave
-import pytest
 from pathlib import Path
-from verbacore.utils.audio import get_ffmpeg_executable, get_audio_duration_seconds, convert_audio_to_mp3
+
+from verbacore.utils.audio import (
+    convert_audio_to_mp3,
+    get_audio_duration_seconds,
+    get_ffmpeg_executable,
+)
 
 
 def test_ffmpeg_executable_available():
@@ -25,4 +29,3 @@ def test_audio_duration_and_mp3_conversion(tmp_path):
     mp3_path = convert_audio_to_mp3(wav_path, tmp_path / "tone.mp3", title="Test Tone")
     assert mp3_path.is_file()
     assert mp3_path.stat().st_size > 100
-

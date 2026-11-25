@@ -4,7 +4,6 @@ import shutil
 import subprocess
 import uuid
 from pathlib import Path
-from typing import Optional
 
 try:
     import imageio_ffmpeg
@@ -33,7 +32,10 @@ def get_audio_duration_seconds(audio_path: Path) -> float:
     try:
         result = subprocess.run(
             [ffmpeg_path, "-hide_banner", "-i", str(audio_path)],
-            capture_output=True, text=True, timeout=FFMPEG_PROBE_TIMEOUT_SECONDS, check=False
+            capture_output=True,
+            text=True,
+            timeout=FFMPEG_PROBE_TIMEOUT_SECONDS,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError) as ex:
         raise RuntimeError(f"Could not inspect recording duration: {ex}") from ex
@@ -47,10 +49,23 @@ def get_audio_duration_seconds(audio_path: Path) -> float:
     try:
         result = subprocess.run(
             [
-                ffmpeg_path, "-hide_banner", "-nostats", "-i", str(audio_path),
-                "-map", "0:a:0", "-progress", "pipe:1", "-f", "null", "-"
+                ffmpeg_path,
+                "-hide_banner",
+                "-nostats",
+                "-i",
+                str(audio_path),
+                "-map",
+                "0:a:0",
+                "-progress",
+                "pipe:1",
+                "-f",
+                "null",
+                "-",
             ],
-            capture_output=True, text=True, timeout=FFMPEG_TIMEOUT_SECONDS, check=False
+            capture_output=True,
+            text=True,
+            timeout=FFMPEG_TIMEOUT_SECONDS,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError) as ex:
         raise RuntimeError(f"Could not measure recording duration: {ex}") from ex
@@ -70,21 +85,37 @@ def get_audio_duration_seconds(audio_path: Path) -> float:
     return duration
 
 
-def convert_audio_to_mp3(source_path: Path, target_mp3: Path, title: Optional[str] = None) -> Path:
+def convert_audio_to_mp3(source_path: Path, target_mp3: Path, title: str | None = None) -> Path:
     """Convert source audio (e.g. webm/wav) into high quality MP3."""
     ffmpeg_path = get_ffmpeg_executable()
     temp_mp3 = target_mp3.with_suffix(f".tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}.mp3")
     cmd = [
-        ffmpeg_path, "-y", "-i", str(source_path),
-        "-map", "0:a:0", "-vn", "-codec:a", "libmp3lame",
-        "-b:a", "128k", "-id3v2_version", "3"
+        ffmpeg_path,
+        "-y",
+        "-i",
+        str(source_path),
+        "-map",
+        "0:a:0",
+        "-vn",
+        "-codec:a",
+        "libmp3lame",
+        "-b:a",
+        "128k",
+        "-id3v2_version",
+        "3",
     ]
     if title:
         cmd.extend(["-metadata", f"title={title}"])
     cmd.append(str(temp_mp3))
 
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT_SECONDS)
+        subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=FFMPEG_TIMEOUT_SECONDS,
+        )
         temp_mp3.replace(target_mp3)
     except (OSError, subprocess.SubprocessError) as ex:
         temp_mp3.unlink(missing_ok=True)
@@ -99,12 +130,33 @@ def segment_audio(source_path: Path, output_pattern: str, chunk_seconds: int = 6
     try:
         subprocess.run(
             [
-                ffmpeg_path, "-y", "-i", str(source_path), "-map", "0:a:0",
-                "-vn", "-ac", "1", "-ar", "16000", "-codec:a", "libmp3lame",
-                "-b:a", "64k", "-f", "segment", "-segment_time",
-                str(chunk_seconds), "-reset_timestamps", "1", output_pattern
+                ffmpeg_path,
+                "-y",
+                "-i",
+                str(source_path),
+                "-map",
+                "0:a:0",
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-codec:a",
+                "libmp3lame",
+                "-b:a",
+                "64k",
+                "-f",
+                "segment",
+                "-segment_time",
+                str(chunk_seconds),
+                "-reset_timestamps",
+                "1",
+                output_pattern,
             ],
-            check=True, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT_SECONDS
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=FFMPEG_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.SubprocessError) as ex:
         raise RuntimeError(f"Could not segment audio: {ex}") from ex

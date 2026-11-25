@@ -1,24 +1,23 @@
-import os
-import sys
 import json
-import time
-import shutil
 import platform
+import shutil
 import subprocess
-import urllib.request
+import sys
+import time
 import urllib.error
+import urllib.request
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any
 
-from verbacore.utils.paths import get_data_dir, get_models_dir
 from verbacore.config import AppConfig
+from verbacore.utils.paths import get_data_dir, get_models_dir
 
 DEFAULT_GGUF_REPO = "Qwen/Qwen2.5-1.5B-Instruct-GGUF"
 DEFAULT_GGUF_FILENAME = "qwen2.5-1.5b-instruct-q4_k_m.gguf"
 DEFAULT_LLAMA_PORT = 8080
 DEFAULT_OLLAMA_PORT = 11434
 
-_LLAMA_PROCESS: Optional[subprocess.Popen] = None
+_LLAMA_PROCESS: subprocess.Popen | None = None
 
 
 def is_endpoint_alive(url: str, timeout: float = 2.0) -> bool:
@@ -31,7 +30,9 @@ def is_endpoint_alive(url: str, timeout: float = 2.0) -> bool:
         return False
 
 
-def check_ollama_status(base_url: str = f"http://127.0.0.1:{DEFAULT_OLLAMA_PORT}") -> Dict[str, Any]:
+def check_ollama_status(
+    base_url: str = f"http://127.0.0.1:{DEFAULT_OLLAMA_PORT}",
+) -> dict[str, Any]:
     """Check if Ollama service is reachable and retrieve list of available models."""
     norm_url = base_url.rstrip("/")
     tags_url = f"{norm_url}/api/tags"
@@ -45,14 +46,16 @@ def check_ollama_status(base_url: str = f"http://127.0.0.1:{DEFAULT_OLLAMA_PORT}
                     "running": True,
                     "url": norm_url,
                     "models": models,
-                    "has_qwen": any("qwen2.5" in m.lower() for m in models)
+                    "has_qwen": any("qwen2.5" in m.lower() for m in models),
                 }
     except Exception:
         pass
     return {"running": False, "url": norm_url, "models": [], "has_qwen": False}
 
 
-def check_llama_server_status(base_url: str = f"http://127.0.0.1:{DEFAULT_LLAMA_PORT}") -> Dict[str, Any]:
+def check_llama_server_status(
+    base_url: str = f"http://127.0.0.1:{DEFAULT_LLAMA_PORT}",
+) -> dict[str, Any]:
     """Check if llama-server is healthy and which model is loaded."""
     norm_url = base_url.rstrip("/")
     health_url = f"{norm_url}/health"
@@ -63,29 +66,28 @@ def check_llama_server_status(base_url: str = f"http://127.0.0.1:{DEFAULT_LLAMA_
                 models_url = f"{norm_url}/v1/models"
                 loaded_model = "unknown"
                 try:
-                    m_req = urllib.request.Request(models_url, headers={"User-Agent": "VerbaCore/1.0"})
+                    m_req = urllib.request.Request(
+                        models_url, headers={"User-Agent": "VerbaCore/1.0"}
+                    )
                     with urllib.request.urlopen(m_req, timeout=2.0) as m_res:
                         m_data = json.loads(m_res.read().decode("utf-8"))
                         if m_data.get("data") and len(m_data["data"]) > 0:
                             loaded_model = m_data["data"][0].get("id", "llama-model")
                 except Exception:
                     pass
-                return {
-                    "running": True,
-                    "url": norm_url,
-                    "loaded_model": loaded_model
-                }
+                return {"running": True, "url": norm_url, "loaded_model": loaded_model}
     except Exception:
         pass
     return {"running": False, "url": norm_url, "loaded_model": None}
 
 
-def find_llama_server(config: Optional[AppConfig] = None) -> Optional[Path]:
+def find_llama_server(config: AppConfig | None = None) -> Path | None:
     """
     Search for a local llama-server executable across configured path, PATH,
     and application directories.
     """
     from verbacore.config import load_config
+
     cfg = config or load_config()
 
     # 1. Configured or environment path
@@ -106,7 +108,7 @@ def find_llama_server(config: Optional[AppConfig] = None) -> Optional[Path]:
         get_models_dir() / "bin" / exe_name,
         get_data_dir() / "bin" / exe_name,
         Path.home() / "llama.cpp" / "build" / "bin" / "Release" / exe_name,
-        Path.home() / ".local" / "bin" / exe_name
+        Path.home() / ".local" / "bin" / exe_name,
     ]
 
     for c in candidates:
@@ -116,11 +118,14 @@ def find_llama_server(config: Optional[AppConfig] = None) -> Optional[Path]:
     return None
 
 
-def find_gguf_model(filename: str = DEFAULT_GGUF_FILENAME, config: Optional[AppConfig] = None) -> Optional[Path]:
+def find_gguf_model(
+    filename: str = DEFAULT_GGUF_FILENAME, config: AppConfig | None = None
+) -> Path | None:
     """
     Locate an existing GGUF model file on disk.
     """
     from verbacore.config import load_config
+
     cfg = config or load_config()
 
     # 1. Configured or environment path
@@ -132,7 +137,7 @@ def find_gguf_model(filename: str = DEFAULT_GGUF_FILENAME, config: Optional[AppC
     candidates = [
         get_models_dir() / filename,
         get_models_dir() / "qwen2.5-1.5b-instruct-q4_k_m.gguf",
-        get_models_dir() / "qwen2.5-1.5b.gguf"
+        get_models_dir() / "qwen2.5-1.5b.gguf",
     ]
 
     for c in candidates:
@@ -145,8 +150,7 @@ def find_gguf_model(filename: str = DEFAULT_GGUF_FILENAME, config: Optional[AppC
 
 
 def download_gguf_model(
-    repo_id: str = DEFAULT_GGUF_REPO,
-    filename: str = DEFAULT_GGUF_FILENAME
+    repo_id: str = DEFAULT_GGUF_REPO, filename: str = DEFAULT_GGUF_FILENAME
 ) -> Path:
     """
     Download Qwen 2.5 1.5B GGUF model weights from Hugging Face Hub directly into models directory.
@@ -167,7 +171,6 @@ def download_gguf_model(
         repo_id=repo_id,
         filename=filename,
         local_dir=str(target_dir),
-        local_dir_use_symlinks=False
     )
     return Path(downloaded)
 
@@ -175,8 +178,8 @@ def download_gguf_model(
 def ensure_gguf_model(
     repo_id: str = DEFAULT_GGUF_REPO,
     filename: str = DEFAULT_GGUF_FILENAME,
-    auto_download: bool = True
-) -> Optional[Path]:
+    auto_download: bool = True,
+) -> Path | None:
     """
     Ensure the GGUF model exists locally, downloading it if absent and auto_download is enabled.
     """
@@ -190,10 +193,10 @@ def ensure_gguf_model(
 
 
 def start_llama_server(
-    server_bin: Optional[Path] = None,
-    model_path: Optional[Path] = None,
+    server_bin: Path | None = None,
+    model_path: Path | None = None,
     port: int = DEFAULT_LLAMA_PORT,
-    threads: int = 4
+    threads: int = 4,
 ) -> bool:
     """
     Launch llama-server in the background serving the specified GGUF model.
@@ -208,13 +211,13 @@ def start_llama_server(
     if not server_bin:
         server_bin = find_llama_server()
     if not server_bin or not server_bin.is_file():
-        print(f"[Model Manager] llama-server binary not found.")
+        print("[Model Manager] llama-server binary not found.")
         return False
 
     if not model_path:
         model_path = ensure_gguf_model(auto_download=True)
     if not model_path or not model_path.is_file():
-        print(f"[Model Manager] GGUF model weights not found or could not be downloaded.")
+        print("[Model Manager] GGUF model weights not found or could not be downloaded.")
         return False
 
     print(f"[Model Manager] Starting llama-server on port {port}...")
@@ -223,20 +226,23 @@ def start_llama_server(
 
     cmd = [
         str(server_bin),
-        "-m", str(model_path),
-        "--port", str(port),
-        "-c", "4096",
-        "--threads", str(threads)
+        "-m",
+        str(model_path),
+        "--port",
+        str(port),
+        "-c",
+        "4096",
+        "--threads",
+        str(threads),
     ]
 
-    kwargs: Dict[str, Any] = {
+    kwargs: dict[str, Any] = {
         "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL
+        "stderr": subprocess.DEVNULL,
     }
     if platform.system() == "Windows":
-        kwargs["creationflags"] = (
-            subprocess.CREATE_NEW_PROCESS_GROUP |
-            getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | getattr(
+            subprocess, "DETACHED_PROCESS", 0x00000008
         )
 
     try:
@@ -254,7 +260,7 @@ def start_llama_server(
         return False
 
 
-def ensure_brain_llm_active(config: Optional[AppConfig] = None) -> Dict[str, Any]:
+def ensure_brain_llm_active(config: AppConfig | None = None) -> dict[str, Any]:
     """
     Orchestrate Brain LLM readiness:
     1. Check if Ollama is active.
@@ -268,7 +274,7 @@ def ensure_brain_llm_active(config: Optional[AppConfig] = None) -> Dict[str, Any
             "active": True,
             "provider": "ollama",
             "url": f"http://127.0.0.1:{DEFAULT_OLLAMA_PORT}",
-            "model": config.brain_llm_model if config else "qwen2.5:1.5b"
+            "model": config.brain_llm_model if config else "qwen2.5:1.5b",
         }
 
     # 2. Check llama-server
@@ -278,7 +284,7 @@ def ensure_brain_llm_active(config: Optional[AppConfig] = None) -> Dict[str, Any
             "active": True,
             "provider": "llama_server",
             "url": f"http://127.0.0.1:{DEFAULT_LLAMA_PORT}",
-            "model": llama_status.get("loaded_model") or "qwen2.5:1.5b"
+            "model": llama_status.get("loaded_model") or "qwen2.5:1.5b",
         }
 
     # 3. Attempt to launch llama-server
@@ -289,15 +295,10 @@ def ensure_brain_llm_active(config: Optional[AppConfig] = None) -> Dict[str, Any
             "active": True,
             "provider": "llama_server",
             "url": f"http://127.0.0.1:{DEFAULT_LLAMA_PORT}",
-            "model": "qwen2.5-1.5b"
+            "model": "qwen2.5-1.5b",
         }
 
-    return {
-        "active": False,
-        "provider": "none",
-        "url": None,
-        "model": None
-    }
+    return {"active": False, "provider": "none", "url": None, "model": None}
 
 
 def main():

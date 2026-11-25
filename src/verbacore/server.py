@@ -1,47 +1,54 @@
-import os
-import re
 import json
-import time
-import uuid
 import mimetypes
+import re
+import uuid
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any
 
-from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
-from verbacore.config import load_config, AppConfig
-from verbacore.utils.paths import (
-    get_data_dir,
-    get_uploads_dir,
-    get_reports_dir,
-    get_recordings_dir,
-    get_models_dir,
-    get_project_root
+from verbacore.asr.engine import HAVE_WHISPER, transcribe_audio_turns
+from verbacore.asr.guardrails import clean_clutter
+from verbacore.config import load_config
+from verbacore.llm.brain import analyze_conversation_with_brain_llm
+from verbacore.llm.cloud import (
+    test_cloud_connection,
+    transcribe_with_gemini,
+    transcribe_with_groq,
 )
-from verbacore.utils.audio import convert_audio_to_mp3
 from verbacore.recordings.manager import (
+    RECORDING_RETENTION_DAYS,
+    create_mp3_for_recording,
     create_recording,
-    save_chunk,
+    delete_recording,
     finalize_recording,
-    read_recording_manifest,
-    save_recording_manifest,
     get_recording_dir,
     list_saved_recordings,
-    delete_recording,
-    create_mp3_for_recording,
-    RECORDING_RETENTION_DAYS
+    read_recording_manifest,
+    save_chunk,
+    save_recording_manifest,
 )
-from verbacore.asr.engine import transcribe_audio_turns, HAVE_WHISPER
-from verbacore.asr.guardrails import clean_clutter, is_prompt_hallucination
-from verbacore.llm.brain import analyze_conversation_with_brain_llm
-from verbacore.llm.cloud import test_cloud_connection, transcribe_with_gemini, transcribe_with_groq
-from verbacore.reports.pdf import render_pdf_transcript, render_pdf_executive_report, HAVE_REPORTLAB
-from verbacore.reports.docx import render_docx_transcript, render_docx_executive_report, HAVE_DOCX
-from verbacore.reports.txt import render_txt_reports, render_srt
+from verbacore.reports.docx import (
+    HAVE_DOCX,
+    render_docx_executive_report,
+    render_docx_transcript,
+)
+from verbacore.reports.pdf import (
+    HAVE_REPORTLAB,
+    render_pdf_executive_report,
+    render_pdf_transcript,
+)
+from verbacore.reports.txt import render_srt, render_txt_reports
+from verbacore.utils.paths import (
+    get_data_dir,
+    get_models_dir,
+    get_project_root,
+    get_reports_dir,
+)
 
 config = load_config()
 app = FastAPI(title="VerbaCore", version="0.2.0")
@@ -94,7 +101,9 @@ def _recording_bytes_used(recording_id: str) -> int:
     return total
 
 
-def assign_speakers(raw_segments: List[Dict[str, Any]], brain_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+def assign_speakers(
+    raw_segments: list[dict[str, Any]], brain_data: dict[str, Any]
+) -> list[dict[str, Any]]:
     if not raw_segments:
         return []
     is_multi = brain_data.get("is_multi_speaker", False)
@@ -104,15 +113,15 @@ def assign_speakers(raw_segments: List[Dict[str, Any]], brain_data: Dict[str, An
     last_end = 0.0
 
     for i, seg in enumerate(raw_segments):
-        start = seg.get('start', 0.0)
-        end = seg.get('end', 0.0)
-        raw_text = seg.get('text', '').strip()
+        start = seg.get("start", 0.0)
+        end = seg.get("end", 0.0)
+        raw_text = seg.get("text", "").strip()
         cleaned = clean_clutter(raw_text)
 
         if not is_multi:
             spk_label = "Speaker 1"
-        elif isinstance(seg.get('speaker'), str) and re.fullmatch(r"Speaker \d+", seg['speaker']):
-            spk_label = seg['speaker']
+        elif isinstance(seg.get("speaker"), str) and re.fullmatch(r"Speaker \d+", seg["speaker"]):
+            spk_label = seg["speaker"]
         elif (
             i < len(llm_speakers)
             and isinstance(llm_speakers[i], str)
@@ -125,14 +134,16 @@ def assign_speakers(raw_segments: List[Dict[str, Any]], brain_data: Dict[str, An
                 current_speaker = 2 if current_speaker == 1 else 1
             spk_label = f"Speaker {current_speaker}"
 
-        assigned.append({
-            'start': start,
-            'end': end,
-            'speaker': spk_label,
-            'lang': seg.get('lang', 'en'),
-            'text': raw_text,
-            'cleaned_text': cleaned
-        })
+        assigned.append(
+            {
+                "start": start,
+                "end": end,
+                "speaker": spk_label,
+                "lang": seg.get("lang", "en"),
+                "text": raw_text,
+                "cleaned_text": cleaned,
+            }
+        )
         last_end = end
 
     return assigned
@@ -154,7 +165,7 @@ async def health_check():
         "version": "0.2.0",
         "have_whisper": HAVE_WHISPER,
         "have_reportlab": HAVE_REPORTLAB,
-        "have_docx": HAVE_DOCX
+        "have_docx": HAVE_DOCX,
     }
 
 
@@ -165,27 +176,36 @@ async def get_models():
         "medium": "faster-whisper Medium (Pro Studio • 769M)",
         "small": "faster-whisper Small (High Accuracy • 244M)",
         "base": "faster-whisper Base (Fast • 74M)",
-        "tiny": "faster-whisper Tiny (Ultra Fast)"
+        "tiny": "faster-whisper Tiny (Ultra Fast)",
     }
     local_list = []
     for m_id, label in labels.items():
         candidate = models_dir / f"faster-whisper-{m_id}"
-        installed = (candidate / "model.bin").is_file() or (candidate / "model.safetensors").is_file()
-        local_list.append({
-            "id": m_id,
-            "label": label,
-            "installed": installed
-        })
+        installed = (candidate / "model.bin").is_file() or (
+            candidate / "model.safetensors"
+        ).is_file()
+        local_list.append({"id": m_id, "label": label, "installed": installed})
 
     brain_status = {"online": False, "provider": "none"}
     try:
-        from verbacore.llm.manager import check_ollama_status, check_llama_server_status
+        from verbacore.llm.manager import check_llama_server_status, check_ollama_status
+
         ollama = check_ollama_status()
         llama = check_llama_server_status()
         if ollama["running"]:
-            brain_status = {"online": True, "provider": "ollama", "url": ollama["url"], "models": ollama["models"]}
+            brain_status = {
+                "online": True,
+                "provider": "ollama",
+                "url": ollama["url"],
+                "models": ollama["models"],
+            }
         elif llama["running"]:
-            brain_status = {"online": True, "provider": "llama-server", "url": llama["url"], "model": llama["loaded_model"]}
+            brain_status = {
+                "online": True,
+                "provider": "llama-server",
+                "url": llama["url"],
+                "model": llama["loaded_model"],
+            }
     except Exception:
         pass
 
@@ -193,9 +213,9 @@ async def get_models():
         "local": local_list,
         "cloud": [
             {"id": "cloud_gemini", "label": "Google Gemini Flash (Multimodal Audio)"},
-            {"id": "cloud_groq", "label": "Groq Whisper Large V3 (Cloud LPU Fast)"}
+            {"id": "cloud_groq", "label": "Groq Whisper Large V3 (Cloud LPU Fast)"},
         ],
-        "brain": brain_status
+        "brain": brain_status,
     }
 
 
@@ -203,7 +223,7 @@ async def get_models():
 async def get_recordings():
     return {
         "recordings": list_saved_recordings(),
-        "retention_days": RECORDING_RETENTION_DAYS
+        "retention_days": RECORDING_RETENTION_DAYS,
     }
 
 
@@ -214,11 +234,7 @@ async def get_recording_mp3(recording_id: str):
         manifest = read_recording_manifest(recording_id)
         display_name = manifest.get("display_name", "recording")
         filename = re.sub(r'[\r\n"\\]', "_", Path(display_name).stem) + ".mp3"
-        return FileResponse(
-            str(mp3_path),
-            media_type="audio/mpeg",
-            filename=filename
-        )
+        return FileResponse(str(mp3_path), media_type="audio/mpeg", filename=filename)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError as e:
@@ -285,7 +301,7 @@ async def finalize_recording_session(recording_id: str, request: Request):
             "status": "ok",
             "recording_id": manifest["recording_id"],
             "name": manifest["display_name"],
-            "size": source_path.stat().st_size
+            "size": source_path.stat().st_size,
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -298,7 +314,7 @@ async def get_cloud_settings():
         "has_gemini": bool(cfg.gemini_api_key),
         "has_groq": bool(cfg.groq_api_key),
         "auto_fallback": cfg.auto_fallback,
-        "preferred_cloud": cfg.preferred_cloud
+        "preferred_cloud": cfg.preferred_cloud,
     }
 
 
@@ -347,10 +363,10 @@ async def test_cloud(request: Request):
 
 @app.post("/api/transcribe")
 async def transcribe(
-    audio: Optional[UploadFile] = File(None),
+    audio: UploadFile | None = File(None),
     model: str = Form("small"),
     language_mode: str = Form("auto"),
-    recording_id: Optional[str] = Form(None)
+    recording_id: str | None = Form(None),
 ):
     if not audio and not recording_id:
         raise HTTPException(status_code=400, detail="No audio file or recording ID provided")
@@ -369,11 +385,12 @@ async def transcribe(
         except FileNotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e))
     else:
+        assert audio is not None
         safe_name = Path(audio.filename or "recording.wav").name
         rec_id, manifest = create_recording(safe_name, audio.content_type or "audio/wav")
         recording_id = rec_id
         source_path = get_recording_dir(rec_id) / "source.webm"
-        
+
         # Enforce max upload size limit
         bytes_read = 0
         chunk_size = 1024 * 1024
@@ -387,7 +404,7 @@ async def transcribe(
                         delete_recording(rec_id)
                         raise HTTPException(
                             status_code=413,
-                            detail=f"Uploaded file exceeds maximum limit of {config.max_upload_bytes // (1024 * 1024)}MB"
+                            detail=f"Uploaded file exceeds maximum limit of {config.max_upload_bytes // (1024 * 1024)}MB",
                         )
                     f.write(chunk)
         except HTTPException:
@@ -433,7 +450,7 @@ async def transcribe(
                 brain_data = analyze_conversation_with_brain_llm(raw_segments, dur, config=cfg)
                 final_languages = brain_data.get("languages", []) or detected_langs
                 segments_with_speakers = assign_speakers(raw_segments, brain_data)
-            except Exception as local_err:
+            except Exception:
                 if cfg.auto_fallback and cfg.gemini_api_key:
                     fallback_used = "Google Gemini Flash (Cloud Fallback)"
                     engine_label = fallback_used
@@ -451,45 +468,68 @@ async def transcribe(
                     )
                     segments_with_speakers = assign_speakers(raw_segments, brain_data)
                 else:
-                    raise local_err
+                    raise
 
         dur_m, dur_s = divmod(dur, 60)
         dur_str = f"{int(dur_m):02d}:{int(dur_s):02d}"
-        total_words = sum(len(s['text'].split()) for s in raw_segments)
+        total_words = sum(len(s["text"].split()) for s in raw_segments)
 
         # 1. Render PDF Reports
         pdf_transcript_name = f"{clean_stem}_{report_id[:8]}_transcript.pdf"
         render_pdf_transcript(
-            safe_name, report_id, dur, final_languages,
-            segments_with_speakers, reports_dir / pdf_transcript_name
+            safe_name,
+            report_id,
+            dur,
+            final_languages,
+            segments_with_speakers,
+            reports_dir / pdf_transcript_name,
         )
 
         pdf_exec_name = f"{clean_stem}_{report_id[:8]}_executive_report.pdf"
         render_pdf_executive_report(
-            safe_name, report_id, dur, final_languages,
-            segments_with_speakers, brain_data, reports_dir / pdf_exec_name
+            safe_name,
+            report_id,
+            dur,
+            final_languages,
+            segments_with_speakers,
+            brain_data,
+            reports_dir / pdf_exec_name,
         )
 
         # 2. Render DOCX Reports
         docx_transcript_name = f"{clean_stem}_{report_id[:8]}_transcript.docx"
         render_docx_transcript(
-            safe_name, report_id, dur, final_languages,
-            segments_with_speakers, reports_dir / docx_transcript_name
+            safe_name,
+            report_id,
+            dur,
+            final_languages,
+            segments_with_speakers,
+            reports_dir / docx_transcript_name,
         )
 
         docx_exec_name = f"{clean_stem}_{report_id[:8]}_executive_report.docx"
         render_docx_executive_report(
-            safe_name, report_id, dur, final_languages,
-            segments_with_speakers, brain_data, reports_dir / docx_exec_name
+            safe_name,
+            report_id,
+            dur,
+            final_languages,
+            segments_with_speakers,
+            brain_data,
+            reports_dir / docx_exec_name,
         )
 
         # 3. Render TXT & SRT Reports
         txt_transcript_name = f"{clean_stem}_{report_id[:8]}_transcript.txt"
         txt_exec_name = f"{clean_stem}_{report_id[:8]}_executive_report.txt"
         render_txt_reports(
-            safe_name, report_id, dur, final_languages,
-            segments_with_speakers, brain_data,
-            reports_dir / txt_transcript_name, reports_dir / txt_exec_name
+            safe_name,
+            report_id,
+            dur,
+            final_languages,
+            segments_with_speakers,
+            brain_data,
+            reports_dir / txt_transcript_name,
+            reports_dir / txt_exec_name,
         )
 
         srt_name = f"{clean_stem}_{report_id[:8]}.srt"
@@ -501,7 +541,11 @@ async def transcribe(
         if not HAVE_DOCX:
             unavailable_exports.append("DOCX")
 
-        is_cloud = bool(fallback_used or (cloud_provider_used and cloud_provider_used != "local") or "cloud" in engine_label.lower())
+        is_cloud = bool(
+            fallback_used
+            or (cloud_provider_used and cloud_provider_used != "local")
+            or "cloud" in engine_label.lower()
+        )
         processing_loc = "cloud" if is_cloud else "local"
 
         files_map = {
@@ -511,7 +555,7 @@ async def transcribe(
             "docx_executive": docx_exec_name if HAVE_DOCX else None,
             "txt_transcript": txt_transcript_name,
             "txt_executive": txt_exec_name,
-            "srt": srt_name
+            "srt": srt_name,
         }
 
         return {
@@ -538,7 +582,7 @@ async def transcribe(
             "txt_transcript": files_map["txt_transcript"],
             "txt_executive": files_map["txt_executive"],
             "srt": files_map["srt"],
-            "files": files_map
+            "files": files_map,
         }
     except Exception as e:
         print(f"[VerbaCore] transcribe error: {e!r}")
@@ -561,7 +605,7 @@ async def get_report_file(filename: str):
     return FileResponse(
         str(file_path),
         media_type=media_type or "application/octet-stream",
-        filename=filename
+        filename=filename,
     )
 
 
@@ -572,15 +616,16 @@ def main():
     print(f"  Live Server:    http://{cfg.host}:{cfg.port}")
     print(f"  Data Directory: {get_data_dir()}")
     try:
-        from verbacore.llm.manager import check_ollama_status, check_llama_server_status
+        from verbacore.llm.manager import check_llama_server_status, check_ollama_status
+
         ollama = check_ollama_status()
         llama = check_llama_server_status()
         if ollama["running"]:
-            print(f"  Brain LLM:      Ollama active on port 11434")
+            print("  Brain LLM:      Ollama active on port 11434")
         elif llama["running"]:
             print(f"  Brain LLM:      llama-server active on port 8080 ({llama['loaded_model']})")
         else:
-            print(f"  Brain LLM:      Standby (will auto-launch llama.cpp if requested)")
+            print("  Brain LLM:      Standby (will auto-launch llama.cpp if requested)")
     except Exception:
         pass
     print("=" * 70)

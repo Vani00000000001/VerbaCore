@@ -1,19 +1,17 @@
 import base64
 import json
-import os
-import re
-import urllib.request
 import urllib.error
+import urllib.request
 import uuid
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Any
 
 from verbacore.asr.guardrails import is_prompt_hallucination
-from verbacore.llm.brain import analyze_conversation_with_brain_llm
 from verbacore.config import AppConfig
+from verbacore.llm.brain import analyze_conversation_with_brain_llm
 
 
-def test_cloud_connection(provider: str, api_key: str) -> Tuple[bool, str]:
+def test_cloud_connection(provider: str, api_key: str) -> tuple[bool, str]:
     """Test connectivity against Gemini or Groq."""
     if not api_key or not api_key.strip():
         return False, "API key cannot be empty."
@@ -22,8 +20,7 @@ def test_cloud_connection(provider: str, api_key: str) -> Tuple[bool, str]:
         if provider == "gemini":
             url = "https://generativelanguage.googleapis.com/v1beta/models"
             req = urllib.request.Request(
-                url,
-                headers={"x-goog-api-key": key, "User-Agent": "VerbaCore/0.2.0"}
+                url, headers={"x-goog-api-key": key, "User-Agent": "VerbaCore/0.2.0"}
             )
             with urllib.request.urlopen(req, timeout=10) as r:
                 if r.status == 200:
@@ -32,7 +29,10 @@ def test_cloud_connection(provider: str, api_key: str) -> Tuple[bool, str]:
             url = "https://api.groq.com/openai/v1/models"
             req = urllib.request.Request(
                 url,
-                headers={"Authorization": f"Bearer {key}", "User-Agent": "VerbaCore/0.2.0"}
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "User-Agent": "VerbaCore/0.2.0",
+                },
             )
             with urllib.request.urlopen(req, timeout=10) as r:
                 if r.status == 200:
@@ -45,19 +45,21 @@ def test_cloud_connection(provider: str, api_key: str) -> Tuple[bool, str]:
 
 
 def transcribe_with_gemini(
-    audio_path: Path,
-    api_key: str,
-    language_mode: str = "auto"
-) -> Tuple[List[Dict[str, Any]], List[str], float, Dict[str, Any]]:
+    audio_path: Path, api_key: str, language_mode: str = "auto"
+) -> tuple[list[dict[str, Any]], list[str], float, dict[str, Any]]:
     """Multimodal transcription and diarization via Gemini Flash."""
     audio_bytes = audio_path.read_bytes()
     b64_audio = base64.b64encode(audio_bytes).decode("utf-8")
     suffix = audio_path.suffix.lower()
     mime_map = {
-        '.mp3': 'audio/mp3', '.wav': 'audio/wav', '.webm': 'audio/webm',
-        '.m4a': 'audio/m4a', '.ogg': 'audio/ogg', '.flac': 'audio/flac'
+        ".mp3": "audio/mp3",
+        ".wav": "audio/wav",
+        ".webm": "audio/webm",
+        ".m4a": "audio/m4a",
+        ".ogg": "audio/ogg",
+        ".flac": "audio/flac",
     }
-    audio_mime = mime_map.get(suffix, 'audio/wav')
+    audio_mime = mime_map.get(suffix, "audio/wav")
 
     prompt = (
         "Transcribe this conversation verbatim with precise timestamps and speaker tags.\n"
@@ -71,7 +73,7 @@ def transcribe_with_gemini(
         '  "action_items": ["..."],\n'
         '  "segments": [\n'
         '    {"start": 0.0, "end": 2.5, "speaker": "Speaker 1", "text": "..."}\n'
-        '  ]\n'
+        "  ]\n"
         "}"
     )
 
@@ -81,20 +83,25 @@ def transcribe_with_gemini(
     for model in models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         payload = {
-            "contents": [{
-                "parts": [
-                    {"inline_data": {"mime_type": audio_mime, "data": b64_audio}},
-                    {"text": prompt}
-                ]
-            }],
-            "generationConfig": {"temperature": 0.1, "response_mime_type": "application/json"}
+            "contents": [
+                {
+                    "parts": [
+                        {"inline_data": {"mime_type": audio_mime, "data": b64_audio}},
+                        {"text": prompt},
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.1,
+                "response_mime_type": "application/json",
+            },
         }
 
         try:
             req = urllib.request.Request(
                 url,
                 data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json", "x-goog-api-key": api_key}
+                headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
             )
             with urllib.request.urlopen(req, timeout=120) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
@@ -105,19 +112,22 @@ def transcribe_with_gemini(
                 for s in data.get("segments", []):
                     txt = s.get("text", "").strip()
                     if txt:
-                        raw_segments.append({
-                            "start": round(float(s.get("start", 0.0)), 2),
-                            "end": round(float(s.get("end", 0.0)), 2),
-                            "speaker": s.get("speaker", "Speaker 1"),
-                            "text": txt,
-                            "cleaned_text": txt
-                        })
+                        raw_segments.append(
+                            {
+                                "start": round(float(s.get("start", 0.0)), 2),
+                                "end": round(float(s.get("end", 0.0)), 2),
+                                "speaker": s.get("speaker", "Speaker 1"),
+                                "text": txt,
+                                "cleaned_text": txt,
+                            }
+                        )
 
                 if raw_segments:
                     dur = max(s["end"] for s in raw_segments)
                 else:
                     try:
                         from verbacore.utils.audio import get_audio_duration_seconds
+
                         dur = get_audio_duration_seconds(audio_path)
                     except Exception:
                         dur = 0.0
@@ -128,7 +138,9 @@ def transcribe_with_gemini(
                     "languages": data.get("languages", ["English"]),
                     "executive_summary": data.get("executive_summary", "Summary not generated."),
                     "key_takeaways": data.get("key_takeaways", ["Dialogue captured."]),
-                    "action_items": data.get("action_items", ["No explicit action items recorded."])
+                    "action_items": data.get(
+                        "action_items", ["No explicit action items recorded."]
+                    ),
                 }
                 return raw_segments, brain_data["languages"], dur, brain_data
         except Exception as e:
@@ -139,37 +151,43 @@ def transcribe_with_gemini(
 
 
 def transcribe_with_groq(
-    audio_path: Path,
-    api_key: str,
-    config: Optional[AppConfig] = None
-) -> Tuple[List[Dict[str, Any]], List[str], float, Dict[str, Any]]:
+    audio_path: Path, api_key: str, config: AppConfig | None = None
+) -> tuple[list[dict[str, Any]], list[str], float, dict[str, Any]]:
     """Transcribe using Groq Whisper Large V3 Turbo."""
     audio_bytes = audio_path.read_bytes()
     boundary = f"----WebKitFormBoundary{uuid.uuid4().hex[:16]}"
     safe_name = audio_path.name
     suffix = audio_path.suffix.lower()
     mime_map = {
-        '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.webm': 'audio/webm',
-        '.m4a': 'audio/m4a', '.ogg': 'audio/ogg', '.flac': 'audio/flac'
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".webm": "audio/webm",
+        ".m4a": "audio/m4a",
+        ".ogg": "audio/ogg",
+        ".flac": "audio/flac",
     }
-    content_mime = mime_map.get(suffix, 'audio/wav')
+    content_mime = mime_map.get(suffix, "audio/wav")
 
     body = (
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="file"; filename="{safe_name}"\r\n'
-        f"Content-Type: {content_mime}\r\n\r\n"
-    ).encode("utf-8") + audio_bytes + (
-        f"\r\n--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="model"\r\n\r\n'
-        f"whisper-large-v3-turbo\r\n"
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="response_format"\r\n\r\n'
-        f"verbose_json\r\n"
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="temperature"\r\n\r\n'
-        f"0.0\r\n"
-        f"--{boundary}--\r\n"
-    ).encode("utf-8")
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{safe_name}"\r\n'
+            f"Content-Type: {content_mime}\r\n\r\n"
+        ).encode()
+        + audio_bytes
+        + (
+            f"\r\n--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="model"\r\n\r\n'
+            f"whisper-large-v3-turbo\r\n"
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="response_format"\r\n\r\n'
+            f"verbose_json\r\n"
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="temperature"\r\n\r\n'
+            f"0.0\r\n"
+            f"--{boundary}--\r\n"
+        ).encode()
+    )
 
     req = urllib.request.Request(
         "https://api.groq.com/openai/v1/audio/transcriptions",
@@ -177,8 +195,8 @@ def transcribe_with_groq(
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "User-Agent": "VerbaCore/0.2.0"
-        }
+            "User-Agent": "VerbaCore/0.2.0",
+        },
     )
 
     with urllib.request.urlopen(req, timeout=60) as resp:
@@ -191,13 +209,15 @@ def transcribe_with_groq(
             txt = s.get("text", "").strip()
             if not txt or is_prompt_hallucination(txt):
                 continue
-            raw_segments.append({
-                "start": round(float(s.get("start", 0.0)), 2),
-                "end": round(float(s.get("end", 0.0)), 2),
-                "lang": lang,
-                "text": txt,
-                "cleaned_text": txt
-            })
+            raw_segments.append(
+                {
+                    "start": round(float(s.get("start", 0.0)), 2),
+                    "end": round(float(s.get("end", 0.0)), 2),
+                    "lang": lang,
+                    "text": txt,
+                    "cleaned_text": txt,
+                }
+            )
 
         brain_data = analyze_conversation_with_brain_llm(
             raw_segments, dur, config=config, auto_start=False

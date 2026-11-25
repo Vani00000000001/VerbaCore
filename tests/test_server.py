@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+
 from verbacore.server import app
 
 client = TestClient(app)
@@ -50,13 +51,19 @@ def test_transcribe_missing_input():
 def test_cors_localhost_only():
     allowed = client.options(
         "/api/health",
-        headers={"Origin": "http://127.0.0.1:7860", "Access-Control-Request-Method": "GET"},
+        headers={
+            "Origin": "http://127.0.0.1:7860",
+            "Access-Control-Request-Method": "GET",
+        },
     )
     assert allowed.headers.get("access-control-allow-origin") == "http://127.0.0.1:7860"
 
     blocked = client.options(
         "/api/health",
-        headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "GET"},
+        headers={
+            "Origin": "https://evil.example",
+            "Access-Control-Request-Method": "GET",
+        },
     )
     assert "access-control-allow-origin" not in blocked.headers
 
@@ -80,4 +87,3 @@ def test_invalid_recording_id_returns_400_and_finalize_reads_expected_chunks():
     assert bad_fin.status_code == 400
     assert "1 of 2" in bad_fin.json()["detail"]
     client.delete(f"/api/recordings/{rec_id}")
-

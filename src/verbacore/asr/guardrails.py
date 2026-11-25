@@ -16,7 +16,7 @@ PROMPT_HALLUCINATION_TRIGGERS = [
     "thanks for watching",
     "subscribe to",
     "subtitles by",
-    "translated by"
+    "translated by",
 ]
 
 
@@ -39,7 +39,7 @@ def clean_repetition_loops(text: str) -> str:
     if not text or is_prompt_hallucination(text):
         return ""
     # Remove repeated adjacent words / tokens (e.g. "aga, aga, aga" -> "aga")
-    text = re.sub(r'(\b\w+\b)(?:[\s,]+(?:\1|\W+)){2,}', r'\1', text, flags=re.IGNORECASE)
+    text = re.sub(r"(\b\w+\b)(?:[\s,]+(?:\1|\W+)){2,}", r"\1", text, flags=re.IGNORECASE)
     # Check if a single token dominates > 55% of the entire output
     tokens = text.split()
     if len(tokens) > 4:
@@ -53,11 +53,11 @@ def clean_clutter(text: str) -> str:
     """Filters out verbal fillers, stuttered words, and speech clutter."""
     if not text:
         return ""
-    fillers = [r'\b(um+h*|uh+h*|er+m*|ah+h*)\b']
+    fillers = [r"\b(um+h*|uh+h*|er+m*|ah+h*)\b"]
     cleaned = text
     for pattern in fillers:
-        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'\b(\w+)\s+\1\b', r'\1', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-    cleaned = re.sub(r'\s+([,.?!])', r'\1', cleaned)
+        cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(\w+)\s+\1\b", r"\1", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = re.sub(r"\s+([,.?!])", r"\1", cleaned)
     return cleaned if cleaned else text
